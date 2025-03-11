@@ -1,21 +1,18 @@
 import os
-import json
-import google.generativeai as genai
 import time
+import google.generativeai as genai
+import json
 import re
+from typing import Dict, List, Any, Optional, Union
 
-# Set up the API key
+# Set API key from environment
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable not set")
-
-# Configure the API
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Set the default model
+# Default model for text generation
 DEFAULT_MODEL = "models/gemini-1.5-pro"
 
-# List available models for debugging
+# Print available Gemini models
 print("Available Gemini models:")
 for model in genai.list_models():
     if "gemini" in model.name:
@@ -44,11 +41,9 @@ def query_gemini(user_query, system_prompt=None, model=DEFAULT_MODEL):
             
             # Prepare the prompt
             if system_prompt:
-                messages = [
-                    {"role": "system", "parts": [system_prompt]},
-                    {"role": "user", "parts": [user_query]}
-                ]
-                response = model_instance.generate_content(messages)
+                # Gemini doesn't support system role directly, so we'll prepend it to the user query
+                combined_prompt = f"{system_prompt}\n\nUser query: {user_query}"
+                response = model_instance.generate_content(combined_prompt)
             else:
                 response = model_instance.generate_content(user_query)
             
@@ -139,12 +134,12 @@ def suggest_query_improvements(user_query, data_context):
             system_prompt=system_prompt,
             model=DEFAULT_MODEL
         )
+        
         # Attempt to parse the response as JSON
         try:
             return json.loads(response)
         except json.JSONDecodeError:
             # Extract JSON from the response if it's not properly formatted
-            import re
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group(0))
@@ -195,12 +190,12 @@ def extract_visualization_parameters(user_query, data_sample):
             system_prompt=system_prompt,
             model=DEFAULT_MODEL
         )
+        
         # Attempt to parse the response as JSON
         try:
             return json.loads(response)
         except json.JSONDecodeError:
             # Extract JSON from the response if it's not properly formatted
-            import re
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group(0))

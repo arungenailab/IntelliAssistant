@@ -1,6 +1,9 @@
 import pandas as pd
 import numpy as np
 import re
+import json
+from sqlalchemy import text
+from typing import Tuple, Dict, List, Any, Optional, Union
 
 def process_query(query, dataframes, db_connection=None):
     """
@@ -16,98 +19,69 @@ def process_query(query, dataframes, db_connection=None):
             - result: DataFrame or other query result
             - dataframes_used: List of dataframe names used in the query
     """
-    # Check if it's a direct SQL query for the database
-    if db_connection and query.lower().startswith("select"):
-        try:
-            from utils.database_connector import execute_query
-            result = execute_query(db_connection, query)
-            return result, ["database"]
-        except Exception as e:
-            raise Exception(f"Database query error: {str(e)}")
+    # Check if query is empty
+    if not query or not isinstance(query, str):
+        return pd.DataFrame(), []
     
-    # Simple pattern matching to identify dataframes used
+    # Identify which dataframes are used in the query
     dataframes_used = []
-    for df_name in dataframes.keys():
-        # Look for the dataframe name as a whole word
-        if re.search(r'\b' + re.escape(df_name) + r'\b', query, re.IGNORECASE):
-            dataframes_used.append(df_name)
+    for name in dataframes.keys():
+        # Look for dataframe name in query (as a word, not part of another word)
+        if re.search(r'\b' + re.escape(name) + r'\b', query):
+            dataframes_used.append(name)
     
-    # Special case: joining multiple dataframes
-    if len(dataframes_used) > 1 and ("join" in query.lower() or "merge" in query.lower()):
-        return process_join_query(query, dataframes, dataframes_used)
+    # If no dataframes are referenced but we have a database connection,
+    # execute against the database
+    if not dataframes_used and db_connection is not None:
+        try:
+            # Execute the query against the database
+            result = pd.read_sql(query, db_connection)
+            return result, []
+        except Exception as e:
+            raise Exception(f"Error executing database query: {str(e)}")
     
-    # If only one dataframe, process as a single dataframe query
-    if len(dataframes_used) == 1:
-        df_name = dataframes_used[0]
-        df = dataframes[df_name]
+    # If we have identified dataframes to use, process the query
+    if dataframes_used:
+        # Simple case: if only one dataframe is used, try to process as a single dataframe query
+        if len(dataframes_used) == 1:
+            df_name = dataframes_used[0]
+            df = dataframes[df_name]
+            
+            # Try to parse the query
+            try:
+                # Extract parts of the query
+                select_match = re.search(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE)
+                where_match = re.search(r'WHERE\s+(.*?)(?:\s+ORDER\s+BY|\s+GROUP\s+BY|\s+LIMIT|\s*$)', query, re.IGNORECASE)
+                order_match = re.search(r'ORDER\s+BY\s+(.*?)(?:\s+LIMIT|\s*$)', query, re.IGNORECASE)
+                group_match = re.search(r'GROUP\s+BY\s+(.*?)(?:\s+ORDER\s+BY|\s+LIMIT|\s*$)', query, re.IGNORECASE)
+                limit_match = re.search(r'LIMIT\s+(\d+)', query, re.IGNORECASE)
+                
+                # Extract the parts
+                select_columns = select_match.group(1) if select_match else "*"
+                where_condition = where_match.group(1) if where_match else None
+                order_by = order_match.group(1) if order_match else None
+                group_by = group_match.group(1) if group_match else None
+                limit = int(limit_match.group(1)) if limit_match else None
+                
+                # Process the single dataframe query
+                result = process_single_dataframe_query(
+                    df, select_columns, where_condition, order_by, group_by, limit
+                )
+                
+                return result, dataframes_used
+            
+            except Exception as e:
+                raise Exception(f"Error processing query on single dataframe: {str(e)}")
         
-        # Very basic SQL-like syntax parsing
-        parts = query.lower().split()
-        
-        # Check for select statement
-        if "select" in parts:
-            select_idx = parts.index("select")
-            
-            # Find where the column list ends (at FROM)
-            from_idx = parts.index("from") if "from" in parts else len(parts)
-            
-            # Extract columns to select
-            select_cols = " ".join(parts[select_idx + 1:from_idx])
-            
-            # Parse where condition if it exists
-            where_condition = None
-            if "where" in parts:
-                where_idx = parts.index("where")
-                
-                # Find the end of the where clause
-                end_where_idx = len(parts)
-                for end_clause in ["order", "group", "limit"]:
-                    if end_clause in parts:
-                        end_where_idx = min(end_where_idx, parts.index(end_clause))
-                
-                where_condition = " ".join(parts[where_idx + 1:end_where_idx])
-            
-            # Parse order by if it exists
-            order_by = None
-            if "order" in parts and "by" in parts and parts.index("by") == parts.index("order") + 1:
-                order_idx = parts.index("order")
-                
-                # Find the end of the order by clause
-                end_order_idx = len(parts)
-                if "limit" in parts:
-                    end_order_idx = parts.index("limit")
-                
-                order_by = " ".join(parts[order_idx + 2:end_order_idx])
-            
-            # Parse group by if it exists
-            group_by = None
-            if "group" in parts and "by" in parts and parts.index("by") == parts.index("group") + 1:
-                group_idx = parts.index("group")
-                
-                # Find the end of the group by clause
-                end_group_idx = len(parts)
-                for end_clause in ["order", "limit"]:
-                    if end_clause in parts:
-                        end_group_idx = min(end_group_idx, parts.index(end_clause))
-                
-                group_by = " ".join(parts[group_idx + 2:end_group_idx])
-            
-            # Parse limit if it exists
-            limit = None
-            if "limit" in parts:
-                limit_idx = parts.index("limit")
-                if limit_idx + 1 < len(parts):
-                    try:
-                        limit = int(parts[limit_idx + 1])
-                    except ValueError:
-                        pass
-            
-            # Process the query
-            return process_single_dataframe_query(
-                df, select_cols, where_condition, order_by, group_by, limit
-            ), dataframes_used
+        # Multiple dataframes: try to handle as a join query
+        else:
+            try:
+                result = process_join_query(query, dataframes, dataframes_used)
+                return result, dataframes_used
+            except Exception as e:
+                raise Exception(f"Error processing join query: {str(e)}")
     
-    # If no dataframes were used or the query couldn't be parsed
+    # If we reach here, we couldn't process the query
     return pd.DataFrame(), []
 
 def process_single_dataframe_query(df, select_columns, where_condition=None, 
@@ -126,174 +100,177 @@ def process_single_dataframe_query(df, select_columns, where_condition=None,
     Returns:
         DataFrame: Query result
     """
-    # Make a copy of the dataframe to avoid modifying the original
-    result = df.copy()
+    # Make a copy to avoid modifying the original
+    result_df = df.copy()
     
-    # Process WHERE condition
+    # Process WHERE clause if present
     if where_condition:
-        # Very basic condition parsing (dangerous but simple for demonstration)
-        # In a real implementation, use a proper parser
+        # Replace SQL-like operators with Python operators
+        condition = where_condition.replace('=', '==').replace('<>', '!=')
+        
+        # Handle SQL LIKE operator
+        like_matches = re.finditer(r'(\w+)\s+LIKE\s+[\'"]([^\'"]*)[\'"]', condition, re.IGNORECASE)
+        for match in like_matches:
+            col_name = match.group(1)
+            pattern = match.group(2).replace('%', '.*')
+            condition = condition.replace(
+                match.group(0),
+                f"{col_name}.str.contains('{pattern}', case=False, regex=True)"
+            )
+        
+        # Handle SQL IN operator
+        in_matches = re.finditer(r'(\w+)\s+IN\s+\((.*?)\)', condition, re.IGNORECASE)
+        for match in in_matches:
+            col_name = match.group(1)
+            values = match.group(2)
+            condition = condition.replace(
+                match.group(0),
+                f"{col_name}.isin([{values}])"
+            )
+        
+        # Handle SQL BETWEEN operator
+        between_matches = re.finditer(r'(\w+)\s+BETWEEN\s+(\S+)\s+AND\s+(\S+)', condition, re.IGNORECASE)
+        for match in between_matches:
+            col_name = match.group(1)
+            lower = match.group(2)
+            upper = match.group(3)
+            condition = condition.replace(
+                match.group(0),
+                f"({col_name} >= {lower}) & ({col_name} <= {upper})"
+            )
+        
+        # Apply the condition
         try:
-            # Replace column references with df['column']
-            for col in df.columns:
-                where_condition = where_condition.replace(col, f"result['{col}']")
-            
-            # Create a boolean mask
-            mask = eval(where_condition)
-            result = result[mask]
+            result_df = result_df.query(condition)
         except Exception as e:
-            raise Exception(f"Error processing WHERE condition: {str(e)}")
+            # If query fails, try a different approach with eval
+            try:
+                mask = pd.eval(condition, engine='python', local_dict={col: result_df[col] for col in result_df.columns})
+                result_df = result_df[mask]
+            except:
+                raise Exception(f"Error processing WHERE condition: {where_condition}")
     
-    # Process GROUP BY
+    # Process GROUP BY clause if present
     if group_by:
-        try:
-            # Simple group by with aggregation
-            group_cols = [col.strip() for col in group_by.split(",")]
+        # Split by comma and strip whitespace
+        group_cols = [col.strip() for col in group_by.split(',')]
+        
+        # Check if we have aggregation functions in the SELECT
+        if select_columns != "*" and any(agg_func in select_columns.lower() for agg_func in 
+                                         ['sum(', 'avg(', 'count(', 'min(', 'max(']):
+            # This is a complex aggregation query
+            # Parse SELECT to find aggregation functions
+            agg_columns = {}
+            select_parts = [part.strip() for part in select_columns.split(',')]
             
-            # If SELECT contains aggregation functions, apply them
-            if "count(" in select_columns.lower() or "sum(" in select_columns.lower() or "avg(" in select_columns.lower():
-                # Extract aggregation functions
-                agg_dict = {}
-                
-                # Extract count() expressions
-                count_pattern = r'count\((.*?)\)'
-                count_matches = re.findall(count_pattern, select_columns, re.IGNORECASE)
-                for match in count_matches:
-                    col = match.strip()
-                    if col == "*":
-                        agg_dict["_count"] = ("__dummy__", "count")
-                    else:
-                        agg_dict[f"{col}_count"] = (col, "count")
-                
-                # Extract sum() expressions
-                sum_pattern = r'sum\((.*?)\)'
-                sum_matches = re.findall(sum_pattern, select_columns, re.IGNORECASE)
-                for match in sum_matches:
-                    col = match.strip()
-                    agg_dict[f"{col}_sum"] = (col, "sum")
-                
-                # Extract avg() expressions
-                avg_pattern = r'avg\((.*?)\)'
-                avg_matches = re.findall(avg_pattern, select_columns, re.IGNORECASE)
-                for match in avg_matches:
-                    col = match.strip()
-                    agg_dict[f"{col}_avg"] = (col, "mean")
-                
-                # Apply aggregations
-                if agg_dict:
-                    # Add dummy column for count(*) if needed
-                    if ("_count", ("__dummy__", "count")) in agg_dict.items():
-                        result["__dummy__"] = 1
-                    
-                    # Create list of aggregations
-                    agg_list = {}
-                    for output_col, (input_col, agg_func) in agg_dict.items():
-                        if input_col not in agg_list:
-                            agg_list[input_col] = []
-                        agg_list[input_col].append(agg_func)
-                    
-                    # Group by and aggregate
-                    result = result.groupby(group_cols).agg(agg_list)
-                    
-                    # Reset index to convert groups back to columns
-                    result = result.reset_index()
-                else:
-                    # If no aggregation functions, just group and count
-                    result = result.groupby(group_cols).size().reset_index(name="count")
+            for part in select_parts:
+                if 'sum(' in part.lower():
+                    col = re.search(r'sum\((.*?)\)', part, re.IGNORECASE).group(1)
+                    agg_columns[col] = 'sum'
+                elif 'avg(' in part.lower():
+                    col = re.search(r'avg\((.*?)\)', part, re.IGNORECASE).group(1)
+                    agg_columns[col] = 'mean'
+                elif 'count(' in part.lower():
+                    col = re.search(r'count\((.*?)\)', part, re.IGNORECASE).group(1)
+                    agg_columns[col] = 'count'
+                elif 'min(' in part.lower():
+                    col = re.search(r'min\((.*?)\)', part, re.IGNORECASE).group(1)
+                    agg_columns[col] = 'min'
+                elif 'max(' in part.lower():
+                    col = re.search(r'max\((.*?)\)', part, re.IGNORECASE).group(1)
+                    agg_columns[col] = 'max'
+            
+            # Group by the specified columns and aggregate
+            if agg_columns:
+                agg_dict = {col: func for col, func in agg_columns.items()}
+                result_df = result_df.groupby(group_cols).agg(agg_dict).reset_index()
             else:
-                # If no aggregation in SELECT, just group and count
-                result = result.groupby(group_cols).size().reset_index(name="count")
-        except Exception as e:
-            raise Exception(f"Error processing GROUP BY: {str(e)}")
+                # Simple group by with no aggregation
+                result_df = result_df.groupby(group_cols).first().reset_index()
+        else:
+            # Simple group by with no aggregation
+            result_df = result_df.groupby(group_cols).first().reset_index()
     
-    # Process SELECT columns
-    if select_columns and select_columns.strip() != "*":
+    # Process SELECT clause if not "*"
+    if select_columns != "*":
+        # Split by comma and strip whitespace
+        columns = [col.strip() for col in select_columns.split(',')]
+        
+        # Check for aggregation functions
+        final_columns = []
+        for col in columns:
+            # Handle aggregation functions if not already handled by GROUP BY
+            if not group_by:
+                if 'sum(' in col.lower():
+                    agg_col = re.search(r'sum\((.*?)\)', col, re.IGNORECASE).group(1)
+                    result_df[col] = result_df[agg_col].sum()
+                    final_columns.append(col)
+                elif 'avg(' in col.lower():
+                    agg_col = re.search(r'avg\((.*?)\)', col, re.IGNORECASE).group(1)
+                    result_df[col] = result_df[agg_col].mean()
+                    final_columns.append(col)
+                elif 'count(' in col.lower():
+                    agg_col = re.search(r'count\((.*?)\)', col, re.IGNORECASE).group(1)
+                    result_df[col] = result_df[agg_col].count()
+                    final_columns.append(col)
+                elif 'min(' in col.lower():
+                    agg_col = re.search(r'min\((.*?)\)', col, re.IGNORECASE).group(1)
+                    result_df[col] = result_df[agg_col].min()
+                    final_columns.append(col)
+                elif 'max(' in col.lower():
+                    agg_col = re.search(r'max\((.*?)\)', col, re.IGNORECASE).group(1)
+                    result_df[col] = result_df[agg_col].max()
+                    final_columns.append(col)
+                else:
+                    final_columns.append(col)
+            else:
+                # If group_by was already processed, we just need the column names
+                final_columns.append(col)
+        
+        # Select only the requested columns
         try:
-            # Handle special case of COUNT(*)
-            if select_columns.lower().strip() == "count(*)":
-                return pd.DataFrame({"count": [len(result)]})
+            result_df = result_df[final_columns]
+        except KeyError as e:
+            # Handle missing columns
+            missing_cols = []
+            for col in final_columns:
+                if col not in result_df.columns:
+                    missing_cols.append(col)
             
-            # Split the columns by commas, handling function calls
-            cols = []
-            current_col = ""
-            paren_count = 0
-            
-            for char in select_columns:
-                if char == "," and paren_count == 0:
-                    cols.append(current_col.strip())
-                    current_col = ""
-                else:
-                    current_col += char
-                    if char == "(":
-                        paren_count += 1
-                    elif char == ")":
-                        paren_count -= 1
-            
-            if current_col:
-                cols.append(current_col.strip())
-            
-            # Process each column or expression
-            selected_cols = []
-            for col_expr in cols:
-                if "(" in col_expr and ")" in col_expr:
-                    # Handle function calls like COUNT, SUM, AVG
-                    func_match = re.match(r'(\w+)\((.*?)\)', col_expr)
-                    if func_match:
-                        func_name = func_match.group(1).lower()
-                        arg = func_match.group(2).strip()
-                        
-                        if func_name == "count":
-                            if arg == "*":
-                                selected_cols.append("count")
-                            else:
-                                selected_cols.append(f"{arg}_count")
-                        elif func_name == "sum":
-                            selected_cols.append(f"{arg}_sum")
-                        elif func_name == "avg":
-                            selected_cols.append(f"{arg}_avg")
-                else:
-                    # Regular column
-                    selected_cols.append(col_expr)
-            
-            # Select only the requested columns
-            available_cols = [col for col in selected_cols if col in result.columns]
-            if available_cols:
-                result = result[available_cols]
-        except Exception as e:
-            raise Exception(f"Error processing SELECT columns: {str(e)}")
+            if missing_cols:
+                raise KeyError(f"Columns not found: {', '.join(missing_cols)}")
+            else:
+                raise e
     
-    # Process ORDER BY
+    # Process ORDER BY clause if present
     if order_by:
-        try:
-            # Split the order by clause into columns and directions
-            order_parts = order_by.split(",")
-            order_cols = []
-            ascending = []
-            
-            for part in order_parts:
-                part = part.strip()
-                if " desc" in part.lower():
-                    col = part.lower().replace(" desc", "").strip()
-                    order_cols.append(col)
-                    ascending.append(False)
-                elif " asc" in part.lower():
-                    col = part.lower().replace(" asc", "").strip()
-                    order_cols.append(col)
-                    ascending.append(True)
-                else:
-                    order_cols.append(part)
-                    ascending.append(True)
-            
-            # Apply sorting
-            result = result.sort_values(by=order_cols, ascending=ascending)
-        except Exception as e:
-            raise Exception(f"Error processing ORDER BY: {str(e)}")
+        # Split by comma and strip whitespace
+        order_cols = []
+        ascending = []
+        
+        # Parse each part
+        for part in order_by.split(','):
+            part = part.strip()
+            if ' DESC' in part.upper():
+                col = part.split(' DESC')[0].strip()
+                order_cols.append(col)
+                ascending.append(False)
+            elif ' ASC' in part.upper():
+                col = part.split(' ASC')[0].strip()
+                order_cols.append(col)
+                ascending.append(True)
+            else:
+                order_cols.append(part)
+                ascending.append(True)
+        
+        # Apply sorting
+        result_df = result_df.sort_values(by=order_cols, ascending=ascending)
     
-    # Apply LIMIT
+    # Apply LIMIT if specified
     if limit is not None:
-        result = result.head(limit)
+        result_df = result_df.head(limit)
     
-    return result
+    return result_df
 
 def process_join_query(query, dataframes, dataframes_used):
     """
@@ -307,51 +284,141 @@ def process_join_query(query, dataframes, dataframes_used):
     Returns:
         DataFrame: Join result
     """
-    # Simple heuristic: look for JOIN ... ON clauses
-    join_conditions = []
-    join_type = "inner"  # Default
+    # Look for JOIN keyword
+    join_match = re.search(r'FROM\s+(\w+)\s+(?:INNER |LEFT |RIGHT |FULL |CROSS )?JOIN', query, re.IGNORECASE)
     
-    # Check for join type
-    if "left join" in query.lower():
-        join_type = "left"
-    elif "right join" in query.lower():
-        join_type = "right"
-    elif "full join" in query.lower() or "outer join" in query.lower():
-        join_type = "outer"
-    
-    # Extract JOIN ... ON conditions
-    join_pattern = r'join\s+(\w+)\s+on\s+(.*?)(?=\s+(?:join|where|group|order|limit|$))'
-    join_matches = re.findall(join_pattern, query.lower())
-    
-    if join_matches:
-        # If explicit join conditions are found
-        dfs_to_join = [dataframes[dataframes_used[0]]]
+    if join_match:
+        # This is an explicit join query
+        # This requires more complex parsing, for now we'll use a simpler approach
+        # Extract the join condition(s)
+        join_conditions = re.finditer(r'JOIN\s+(\w+)\s+ON\s+(.*?)(?:\s+(?:INNER |LEFT |RIGHT |FULL |CROSS )?JOIN|\s+WHERE|\s+GROUP|\s+ORDER|\s+LIMIT|\s*$)', query, re.IGNORECASE)
         
-        for table_name, condition in join_matches:
-            if table_name in dataframes:
-                right_df = dataframes[table_name]
+        # Start with the first table
+        primary_table = join_match.group(1)
+        result_df = dataframes[primary_table].copy()
+        
+        # Apply each join
+        for match in join_conditions:
+            secondary_table = match.group(1)
+            condition = match.group(2)
+            
+            # Parse the condition (assuming format like "table1.col1 = table2.col2")
+            condition_match = re.search(r'(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)', condition)
+            
+            if condition_match:
+                left_table = condition_match.group(1)
+                left_col = condition_match.group(2)
+                right_table = condition_match.group(3)
+                right_col = condition_match.group(4)
                 
-                # Parse the join condition to extract column names
-                condition = condition.strip()
+                # Determine join type
+                join_type_match = re.search(r'(INNER|LEFT|RIGHT|FULL|CROSS)\s+JOIN\s+' + re.escape(secondary_table), query, re.IGNORECASE)
+                join_type = join_type_match.group(1).lower() if join_type_match else 'inner'
                 
-                # Simple condition parsing (assumes format like 'table1.col1 = table2.col2')
-                parts = condition.split('=')
-                if len(parts) == 2:
-                    left_col = parts[0].strip().split('.')[-1]
-                    right_col = parts[1].strip().split('.')[-1]
+                # Perform the join
+                if join_type == 'left':
+                    result_df = pd.merge(result_df, dataframes[secondary_table], 
+                                         left_on=left_col, right_on=right_col, 
+                                         how='left', suffixes=('', f'_{secondary_table}'))
+                elif join_type == 'right':
+                    result_df = pd.merge(result_df, dataframes[secondary_table], 
+                                         left_on=left_col, right_on=right_col, 
+                                         how='right', suffixes=('', f'_{secondary_table}'))
+                elif join_type == 'full':
+                    result_df = pd.merge(result_df, dataframes[secondary_table], 
+                                         left_on=left_col, right_on=right_col, 
+                                         how='outer', suffixes=('', f'_{secondary_table}'))
+                elif join_type == 'cross':
+                    # Cross join is a cartesian product
+                    result_df = pd.merge(result_df, dataframes[secondary_table], 
+                                         how='cross', suffixes=('', f'_{secondary_table}'))
+                else:  # inner join by default
+                    result_df = pd.merge(result_df, dataframes[secondary_table], 
+                                         left_on=left_col, right_on=right_col, 
+                                         how='inner', suffixes=('', f'_{secondary_table}'))
+        
+        # Now that we have joined the tables, we need to apply any WHERE, GROUP BY, etc.
+        # Extract relevant parts from the query
+        where_match = re.search(r'WHERE\s+(.*?)(?:\s+GROUP\s+BY|\s+ORDER\s+BY|\s+LIMIT|\s*$)', query, re.IGNORECASE)
+        group_match = re.search(r'GROUP\s+BY\s+(.*?)(?:\s+ORDER\s+BY|\s+LIMIT|\s*$)', query, re.IGNORECASE)
+        order_match = re.search(r'ORDER\s+BY\s+(.*?)(?:\s+LIMIT|\s*$)', query, re.IGNORECASE)
+        limit_match = re.search(r'LIMIT\s+(\d+)', query, re.IGNORECASE)
+        select_match = re.search(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE)
+        
+        # Apply WHERE if present
+        if where_match:
+            where_condition = where_match.group(1)
+            # We need to modify column references like "table.column" to just "column"
+            # This is a simplification; a proper implementation would handle column name conflicts
+            for table_name in dataframes_used:
+                where_condition = where_condition.replace(f"{table_name}.", "")
+            
+            result_df = process_single_dataframe_query(
+                result_df, "*", where_condition, None, None, None
+            )
+        
+        # Apply GROUP BY if present
+        if group_match:
+            group_by = group_match.group(1)
+            # Modify column references
+            for table_name in dataframes_used:
+                group_by = group_by.replace(f"{table_name}.", "")
+            
+            select_columns = select_match.group(1) if select_match else "*"
+            # Modify column references in SELECT
+            for table_name in dataframes_used:
+                select_columns = select_columns.replace(f"{table_name}.", "")
+            
+            result_df = process_single_dataframe_query(
+                result_df, select_columns, None, None, group_by, None
+            )
+        elif select_match:
+            # Apply SELECT if no GROUP BY
+            select_columns = select_match.group(1)
+            # Modify column references
+            for table_name in dataframes_used:
+                select_columns = select_columns.replace(f"{table_name}.", "")
+            
+            # Get the list of columns to select
+            cols_to_select = [col.strip() for col in select_columns.split(',')]
+            
+            # Handle special case "SELECT *"
+            if select_columns.strip() != "*":
+                try:
+                    result_df = result_df[cols_to_select]
+                except KeyError as e:
+                    # Some columns might be missing or have been renamed during the join
+                    missing_cols = []
+                    for col in cols_to_select:
+                        if col not in result_df.columns:
+                            missing_cols.append(col)
                     
-                    # Perform the join
-                    dfs_to_join.append((right_df, left_col, right_col))
+                    if missing_cols:
+                        raise KeyError(f"Columns not found: {', '.join(missing_cols)}")
+                    else:
+                        raise e
         
-        # Perform sequential joins
-        result = dfs_to_join[0]
-        for right_df, left_col, right_col in dfs_to_join[1:]:
-            result = result.merge(right_df, left_on=left_col, right_on=right_col, how=join_type)
+        # Apply ORDER BY if present
+        if order_match:
+            order_by = order_match.group(1)
+            # Modify column references
+            for table_name in dataframes_used:
+                order_by = order_by.replace(f"{table_name}.", "")
+            
+            result_df = process_single_dataframe_query(
+                result_df, "*", None, order_by, None, None
+            )
         
-        return result, dataframes_used
+        # Apply LIMIT if present
+        if limit_match:
+            limit = int(limit_match.group(1))
+            result_df = result_df.head(limit)
+        
+        return result_df
+    
     else:
-        # If no explicit join conditions, try to join on common columns
-        return join_on_common_columns(dataframes, dataframes_used), dataframes_used
+        # No explicit JOIN, try to join on common columns
+        return join_on_common_columns(dataframes, dataframes_used)
 
 def join_on_common_columns(dataframes, dataframes_used):
     """
@@ -368,25 +435,24 @@ def join_on_common_columns(dataframes, dataframes_used):
         return pd.DataFrame()
     
     # Start with the first dataframe
-    result = dataframes[dataframes_used[0]]
+    result = dataframes[dataframes_used[0]].copy()
     
     # Join with each subsequent dataframe
     for df_name in dataframes_used[1:]:
-        right_df = dataframes[df_name]
+        df = dataframes[df_name]
         
         # Find common columns
-        common_cols = list(set(result.columns) & set(right_df.columns))
+        common_cols = list(set(result.columns).intersection(set(df.columns)))
         
         if common_cols:
-            # Join on all common columns
-            result = result.merge(right_df, on=common_cols, how='inner')
+            # Join on common columns
+            result = pd.merge(result, df, on=common_cols, how='inner')
         else:
-            # If no common columns, do a cross join (cartesian product)
-            # In pandas, this is achieved by adding a dummy column
-            result['__key'] = 1
-            right_df['__key'] = 1
-            result = result.merge(right_df, on='__key', how='inner')
-            result = result.drop('__key', axis=1)
+            # No common columns, do a cross join (cartesian product)
+            result['_key'] = 1
+            df['_key'] = 1
+            result = pd.merge(result, df, on='_key', how='outer')
+            result.drop('_key', axis=1, inplace=True)
     
     return result
 
@@ -402,43 +468,48 @@ def join_datasets(dfs, join_keys=None, join_type='inner'):
     Returns:
         DataFrame: Joined dataframe
     """
-    if not dfs or len(dfs) < 2:
-        return dfs[0] if dfs else pd.DataFrame()
+    if not dfs:
+        return pd.DataFrame()
     
     # Start with the first dataframe
-    result = dfs[0]
+    result = dfs[0].copy()
     
-    for i, right_df in enumerate(dfs[1:], 1):
-        # Determine join keys
-        if join_keys:
+    # Join with each subsequent dataframe
+    for i, df in enumerate(dfs[1:], 1):
+        if join_keys is not None:
+            # Join on specified keys
             left_key = join_keys.get(i-1)
             right_key = join_keys.get(i)
             
-            if left_key and right_key:
-                # Join on specified keys
-                result = result.merge(right_df, left_on=left_key, right_on=right_key, how=join_type)
+            if left_key is not None and right_key is not None:
+                result = pd.merge(result, df, left_on=left_key, right_on=right_key, 
+                                 how=join_type, suffixes=('', f'_{i}'))
             else:
-                # Fall back to common columns
-                common_cols = list(set(result.columns) & set(right_df.columns))
+                # No keys specified, try to find common columns
+                common_cols = list(set(result.columns).intersection(set(df.columns)))
+                
                 if common_cols:
-                    result = result.merge(right_df, on=common_cols, how=join_type)
+                    # Join on common columns
+                    result = pd.merge(result, df, on=common_cols, how=join_type)
                 else:
-                    # Cross join if no common columns
-                    result['__key'] = 1
-                    right_df['__key'] = 1
-                    result = result.merge(right_df, on='__key', how=join_type)
-                    result = result.drop('__key', axis=1)
+                    # No common columns, do a cross join
+                    result['_key'] = 1
+                    df['_key'] = 1
+                    result = pd.merge(result, df, on='_key', how='outer')
+                    result.drop('_key', axis=1, inplace=True)
         else:
-            # Auto-detect common columns
-            common_cols = list(set(result.columns) & set(right_df.columns))
+            # No keys specified, try to find common columns
+            common_cols = list(set(result.columns).intersection(set(df.columns)))
+            
             if common_cols:
-                result = result.merge(right_df, on=common_cols, how=join_type)
+                # Join on common columns
+                result = pd.merge(result, df, on=common_cols, how=join_type)
             else:
-                # Cross join if no common columns
-                result['__key'] = 1
-                right_df['__key'] = 1
-                result = result.merge(right_df, on='__key', how=join_type)
-                result = result.drop('__key', axis=1)
+                # No common columns, do a cross join
+                result['_key'] = 1
+                df['_key'] = 1
+                result = pd.merge(result, df, on='_key', how='outer')
+                result.drop('_key', axis=1, inplace=True)
     
     return result
 
@@ -454,65 +525,61 @@ def extract_features(df, text_cols=None, date_cols=None):
     Returns:
         DataFrame: Dataframe with extracted features
     """
-    # Make a copy of the dataframe
-    result = df.copy()
-    
-    # Auto-detect text columns if not specified
-    if text_cols is None:
-        text_cols = df.select_dtypes(include=['object']).columns.tolist()
-    
-    # Auto-detect date columns if not specified
-    if date_cols is None:
-        date_cols = []
-        for col in df.columns:
-            try:
-                if pd.api.types.is_datetime64_any_dtype(df[col]):
-                    date_cols.append(col)
-                elif df[col].dtype == 'object':
-                    # Try to convert to datetime
-                    pd.to_datetime(df[col], errors='raise')
-                    date_cols.append(col)
-            except:
-                continue
+    # Make a copy to avoid modifying the original
+    result_df = df.copy()
     
     # Process text columns
+    if text_cols is None:
+        # Try to identify text columns automatically
+        text_cols = [col for col in df.select_dtypes(include=['object']).columns 
+                     if df[col].str.len().mean() > 5]  # Average length > 5 characters
+    
     for col in text_cols:
         if col in df.columns:
-            # Convert to string if not already
-            result[col] = result[col].astype(str)
+            # Character count
+            result_df[f"{col}_char_count"] = df[col].str.len()
             
-            # Extract text features
-            result[f'{col}_length'] = result[col].str.len()
-            result[f'{col}_word_count'] = result[col].str.split().str.len()
+            # Word count
+            result_df[f"{col}_word_count"] = df[col].str.split().str.len()
             
-            # Extract more features if column has enough data
-            if result[col].str.len().mean() > 10:
-                result[f'{col}_capitals'] = result[col].str.count(r'[A-Z]')
-                result[f'{col}_digits'] = result[col].str.count(r'[0-9]')
-                result[f'{col}_special'] = result[col].str.count(r'[^\w\s]')
+            # Uppercase count
+            result_df[f"{col}_upper_count"] = df[col].str.count(r'[A-Z]')
+            
+            # Lowercase count
+            result_df[f"{col}_lower_count"] = df[col].str.count(r'[a-z]')
+            
+            # Number count
+            result_df[f"{col}_digit_count"] = df[col].str.count(r'[0-9]')
+            
+            # Special character count
+            result_df[f"{col}_special_count"] = df[col].str.count(r'[^\w\s]')
     
     # Process date columns
+    if date_cols is None:
+        # Try to identify date columns automatically
+        date_cols = df.select_dtypes(include=['datetime']).columns.tolist()
+    
     for col in date_cols:
         if col in df.columns:
-            # Convert to datetime if not already
-            if not pd.api.types.is_datetime64_any_dtype(df[col]):
-                try:
-                    result[col] = pd.to_datetime(result[col])
-                except:
-                    continue
+            # Extract year
+            result_df[f"{col}_year"] = df[col].dt.year
             
-            # Extract date features
-            result[f'{col}_year'] = result[col].dt.year
-            result[f'{col}_month'] = result[col].dt.month
-            result[f'{col}_day'] = result[col].dt.day
-            result[f'{col}_dayofweek'] = result[col].dt.dayofweek
-            result[f'{col}_quarter'] = result[col].dt.quarter
+            # Extract month
+            result_df[f"{col}_month"] = df[col].dt.month
             
-            # Extract more features for time data
-            if (result[col].dt.hour != 0).any():
-                result[f'{col}_hour'] = result[col].dt.hour
+            # Extract day
+            result_df[f"{col}_day"] = df[col].dt.day
+            
+            # Extract day of week
+            result_df[f"{col}_day_of_week"] = df[col].dt.dayofweek
+            
+            # Extract quarter
+            result_df[f"{col}_quarter"] = df[col].dt.quarter
+            
+            # Is weekend
+            result_df[f"{col}_is_weekend"] = df[col].dt.dayofweek.isin([5, 6]).astype(int)
     
-    return result
+    return result_df
 
 def aggregate_data(df, group_cols, agg_cols=None, agg_funcs=None):
     """
@@ -527,36 +594,30 @@ def aggregate_data(df, group_cols, agg_cols=None, agg_funcs=None):
     Returns:
         DataFrame: Aggregated dataframe
     """
-    # Make sure group_cols is a list
-    if isinstance(group_cols, str):
-        group_cols = [group_cols]
-    
-    # Auto-detect numeric columns for aggregation if not specified
     if agg_cols is None:
-        agg_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        # Remove group columns from agg_cols
+        # Use all numeric columns
+        agg_cols = df.select_dtypes(include=['number']).columns.tolist()
+        # Remove group columns from aggregation columns
         agg_cols = [col for col in agg_cols if col not in group_cols]
     
-    # Default aggregation functions
+    if not agg_cols:
+        # No columns to aggregate
+        return df.groupby(group_cols).size().reset_index(name='count')
+    
     if agg_funcs is None:
-        agg_funcs = ['count', 'mean', 'sum', 'min', 'max']
+        # Default aggregation functions
+        agg_funcs = ['sum', 'mean', 'min', 'max', 'count']
     
     # Create aggregation dictionary
-    agg_dict = {}
-    for col in agg_cols:
-        agg_dict[col] = agg_funcs
+    agg_dict = {col: agg_funcs for col in agg_cols}
     
     # Perform aggregation
-    if agg_dict:
-        result = df.groupby(group_cols).agg(agg_dict)
-        
-        # Flatten the column names
-        result.columns = ['_'.join(col).strip() for col in result.columns.values]
-        
-        # Reset index to convert groupby columns back to regular columns
-        result = result.reset_index()
-    else:
-        # If no columns to aggregate, just count by group
-        result = df.groupby(group_cols).size().reset_index(name='count')
+    result = df.groupby(group_cols).agg(agg_dict)
+    
+    # Flatten multi-level column index
+    result.columns = ['_'.join(col).strip() for col in result.columns.values]
+    
+    # Reset index to get group columns back as regular columns
+    result = result.reset_index()
     
     return result

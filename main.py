@@ -130,7 +130,7 @@ with st.sidebar:
                 
                 if st.button(f"Remove {name}", key=f"remove_{name}"):
                     del st.session_state.current_data[name]
-                    st.experimental_rerun()
+                    st.rerun()
     else:
         st.info("No datasets available. Upload a file or connect to a database.")
     
@@ -545,7 +545,7 @@ if user_input:
     handle_query(user_input)
     
     # Force a rerun to update the chat display
-    st.experimental_rerun()
+    st.rerun()
 
 # Welcome message for first-time users
 if not st.session_state.chat_history:

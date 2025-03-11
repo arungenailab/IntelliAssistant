@@ -1,0 +1,2 @@
+{"id": "42befe69-d559-43a5-91f8-16adc8f3cc6f", "timestamp": "2025-03-11T16:59:37.463508", "user_id": "67f395ef-79ab-4b8b-9d17-99df6679cc00", "action": "query", "details": {"query": "\"Create a bar chart of sales by region\"\n"}}
+{"id": "a125e51a-db2f-40ba-89d5-e875d2a24e69", "timestamp": "2025-03-11T16:59:44.201313", "user_id": "67f395ef-79ab-4b8b-9d17-99df6679cc00", "action": "error", "details": {"error": "Failed to query Gemini after 3 attempts: 429 Resource has been exhausted (e.g. check quota).", "query": "\"Create a bar chart of sales by region\"\n"}}

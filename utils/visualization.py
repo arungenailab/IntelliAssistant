@@ -3,7 +3,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
-from datetime import datetime
+from typing import Dict, List, Any, Optional, Union
 
 def create_visualization(data, vis_type, query_text, custom_title=None):
     """
@@ -18,58 +18,41 @@ def create_visualization(data, vis_type, query_text, custom_title=None):
     Returns:
         dict: Visualization result containing the figure and metadata
     """
-    if data is None or data.empty:
-        return None
+    # Determine visualization type if not specified
+    if not vis_type or vis_type.lower() == 'auto':
+        vis_type = determine_best_visualization(data)
     
-    # Generate a title if not provided
-    title = custom_title or f"Visualization of {query_text}"
+    # Generate a title based on the query if not provided
+    if not custom_title:
+        custom_title = generate_title_from_query(query_text, vis_type)
     
-    try:
-        # Create different types of visualizations
-        if vis_type.lower() == 'bar':
-            fig = create_bar_chart(data, title)
-        elif vis_type.lower() == 'line':
-            fig = create_line_chart(data, title)
-        elif vis_type.lower() == 'scatter':
-            fig = create_scatter_plot(data, title)
-        elif vis_type.lower() == 'pie':
-            fig = create_pie_chart(data, title)
-        elif vis_type.lower() == 'histogram':
-            fig = create_histogram(data, title)
-        elif vis_type.lower() == 'heatmap':
-            fig = create_heatmap(data, title)
-        elif vis_type.lower() == 'box':
-            fig = create_box_plot(data, title)
-        else:
-            # Default to bar chart
-            fig = create_bar_chart(data, title)
-            vis_type = 'bar'
-        
-        # Return the visualization result
-        return {
-            'fig': fig,
-            'type': vis_type,
-            'title': title,
-            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
+    # Create the visualization
+    if vis_type.lower() in ['bar', 'barplot', 'bar chart']:
+        fig = create_bar_chart(data, custom_title)
+    elif vis_type.lower() in ['line', 'lineplot', 'line chart']:
+        fig = create_line_chart(data, custom_title)
+    elif vis_type.lower() in ['scatter', 'scatterplot']:
+        fig = create_scatter_plot(data, custom_title)
+    elif vis_type.lower() in ['pie', 'piechart', 'pie chart']:
+        fig = create_pie_chart(data, custom_title)
+    elif vis_type.lower() in ['histogram', 'hist']:
+        fig = create_histogram(data, custom_title)
+    elif vis_type.lower() in ['heatmap', 'heat map']:
+        fig = create_heatmap(data, custom_title)
+    elif vis_type.lower() in ['box', 'boxplot', 'box plot']:
+        fig = create_box_plot(data, custom_title)
+    else:
+        # Default to bar chart if type is not recognized
+        fig = create_bar_chart(data, custom_title)
+        vis_type = 'bar'
     
-    except Exception as e:
-        # If there's an error, try a simpler visualization
-        try:
-            # Default to a simple bar chart of the first two columns
-            cols = data.columns[:2] if len(data.columns) >= 2 else data.columns
-            fig = px.bar(data, x=cols[0], y=cols[1], title=f"Simplified visualization of {query_text}")
-            
-            return {
-                'fig': fig,
-                'type': 'bar',
-                'title': f"Simplified visualization of {query_text}",
-                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'error': str(e)
-            }
-        except:
-            # If that fails too, return None
-            return None
+    # Return the visualization with metadata
+    return {
+        "fig": fig,
+        "type": vis_type,
+        "title": custom_title,
+        "data_shape": data.shape
+    }
 
 def create_multi_visualization(data, vis_types, query_text):
     """
@@ -83,13 +66,12 @@ def create_multi_visualization(data, vis_types, query_text):
     Returns:
         list: List of visualization results
     """
-    result = []
-    for vis_type in vis_types:
-        viz = create_visualization(data, vis_type, query_text)
-        if viz:
-            result.append(viz)
+    visualizations = []
     
-    return result
+    for vis_type in vis_types:
+        visualizations.append(create_visualization(data, vis_type, query_text))
+    
+    return visualizations
 
 def create_dashboard(data_dict, queries=None):
     """
@@ -103,18 +85,29 @@ def create_dashboard(data_dict, queries=None):
         dict: Dashboard configuration with figures
     """
     dashboard = {
-        'title': 'Data Analysis Dashboard',
-        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'visualizations': []
+        "title": "Data Analysis Dashboard",
+        "visualizations": []
     }
     
     for name, df in data_dict.items():
-        query = queries.get(name, f"Analysis of {name}") if queries else f"Analysis of {name}"
-        best_vis_type = determine_best_visualization(df)
-        viz = create_visualization(df, best_vis_type, query, f"Analysis of {name}")
+        # Skip empty dataframes
+        if df.empty:
+            continue
         
-        if viz:
-            dashboard['visualizations'].append(viz)
+        # Determine best visualization for this dataset
+        vis_type = determine_best_visualization(df)
+        
+        # Get associated query if available
+        query = queries.get(name, f"Analysis of {name}") if queries else f"Analysis of {name}"
+        
+        # Create visualization
+        visualization = create_visualization(df, vis_type, query, custom_title=name)
+        
+        # Add to dashboard
+        dashboard["visualizations"].append({
+            "name": name,
+            "visualization": visualization
+        })
     
     return dashboard
 
@@ -128,143 +121,199 @@ def determine_best_visualization(df):
     Returns:
         str: Recommended visualization type
     """
-    # Check dataframe properties to determine the best visualization
-    if df is None or df.empty:
-        return 'bar'  # Default
-    
-    num_rows = len(df)
-    num_cols = len(df.columns)
+    # Check dataframe size
+    num_rows, num_cols = df.shape
     
     # Get numeric and categorical columns
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    categorical_cols = df.select_dtypes(include=['object', 'category']).columns
-    date_cols = [col for col in df.columns if pd.api.types.is_datetime64_any_dtype(df[col])]
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    datetime_cols = df.select_dtypes(include=['datetime']).columns.tolist()
     
+    # Count column types
     num_numeric = len(numeric_cols)
     num_categorical = len(categorical_cols)
+    num_datetime = len(datetime_cols)
     
-    # Decision logic for visualization type
+    # Logic to determine visualization type
+    if num_rows == 0 or num_cols == 0:
+        return "table"  # Empty data, just show as table
     
-    # Time series data
-    if date_cols and num_numeric >= 1:
-        return 'line'
+    # Time series detection
+    if num_datetime > 0 and num_numeric > 0:
+        return "line"  # Time series data
     
-    # Few categories, good for pie chart
-    if num_categorical == 1 and num_numeric == 1 and df[categorical_cols[0]].nunique() <= 7:
-        return 'pie'
-    
-    # Correlation or relationship between two numeric variables
-    if num_numeric >= 2:
-        # If many points, scatter plot is good
-        if num_rows > 30:
-            return 'scatter'
-        # For fewer points, a line chart might be better
-        else:
-            return 'line'
-    
-    # One numeric and one categorical, bar chart is usually good
-    if num_numeric >= 1 and num_categorical >= 1:
-        # But if there are too many categories, a box plot might be better
-        if df[categorical_cols[0]].nunique() > 10:
-            return 'box'
-        else:
-            return 'bar'
-    
-    # Distribution of a single numeric variable
+    # Distribution analysis
     if num_numeric == 1 and num_categorical == 0:
-        return 'histogram'
+        return "histogram"  # Single numeric column
     
-    # Correlation matrix for multiple numeric variables
-    if num_numeric > 2:
-        return 'heatmap'
+    # Correlation analysis
+    if num_numeric >= 2 and num_categorical == 0:
+        return "scatter"  # Multiple numeric columns
     
-    # Default to bar chart
-    return 'bar'
+    # Categorical data
+    if num_numeric == 1 and num_categorical == 1:
+        if df[categorical_cols[0]].nunique() <= 10:
+            return "bar"  # One category with reasonable number of values
+        else:
+            return "box"  # One category with many values
+    
+    # Composition analysis
+    if num_numeric == 1 and num_categorical == 1:
+        if df[categorical_cols[0]].nunique() <= 7 and num_rows <= 20:
+            return "pie"  # Small number of categories for pie chart
+    
+    # Multiple categories
+    if num_categorical >= 2 and num_numeric >= 1:
+        return "heatmap"  # Show relationships between categories
+    
+    # Default case
+    if num_numeric >= 1:
+        return "bar"  # Default to bar chart for numeric data
+    else:
+        return "table"  # Default to table for non-numeric data
+
+def generate_title_from_query(query, vis_type):
+    """Generate a title based on the query and visualization type."""
+    # Clean the query
+    query = query.strip()
+    
+    # Remove common prefixes
+    prefixes = ["show me", "display", "visualize", "plot", "graph", "create a", "generate a"]
+    for prefix in prefixes:
+        if query.lower().startswith(prefix):
+            query = query[len(prefix):].strip()
+    
+    # Capitalize first letter
+    if query:
+        query = query[0].upper() + query[1:]
+    
+    # Add visualization type if not in query
+    if vis_type.lower() not in query.lower():
+        return f"{query} ({vis_type.capitalize()} Chart)"
+    else:
+        return query
 
 def create_bar_chart(df, title):
     """Create a bar chart from dataframe."""
-    # For a bar chart, we need at least one categorical and one numeric column
-    categorical_cols = df.select_dtypes(include=['object', 'category']).columns
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    # Identify potential x and y columns
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
     
-    if len(categorical_cols) > 0 and len(numeric_cols) > 0:
-        # Use the first categorical column for x-axis and first numeric for y-axis
-        x_col = categorical_cols[0]
-        y_col = numeric_cols[0]
-        
-        # If too many categories, limit to top 10
-        if df[x_col].nunique() > 10:
-            top_categories = df.groupby(x_col)[y_col].sum().nlargest(10).index
-            filtered_df = df[df[x_col].isin(top_categories)]
-            fig = px.bar(filtered_df, x=x_col, y=y_col, title=title)
-            fig.update_layout(xaxis_title=x_col, yaxis_title=y_col)
+    # Default columns
+    if categorical_cols and numeric_cols:
+        x_col = categorical_cols[0]  # First categorical column as x-axis
+        y_col = numeric_cols[0]  # First numeric column as y-axis
+    elif len(numeric_cols) >= 2:
+        x_col = numeric_cols[0]  # First numeric column as x-axis
+        y_col = numeric_cols[1]  # Second numeric column as y-axis
+    elif numeric_cols and len(df.columns) >= 2:
+        x_col = df.columns[0] if df.columns[0] != numeric_cols[0] else df.columns[1]  # Non-numeric column as x-axis
+        y_col = numeric_cols[0]  # Numeric column as y-axis
+    else:
+        # Fallback if we can't determine appropriate columns
+        x_col = df.columns[0]
+        y_col = df.columns[1] if len(df.columns) > 1 else df.columns[0]
+    
+    # Check for color column (if there's a second categorical column)
+    color_col = None
+    if len(categorical_cols) > 1 and categorical_cols[0] != x_col:
+        color_col = categorical_cols[0]
+    elif len(categorical_cols) > 1:
+        color_col = categorical_cols[1]
+    
+    # Create the bar chart
+    try:
+        if color_col:
+            fig = px.bar(df, x=x_col, y=y_col, color=color_col, title=title)
         else:
             fig = px.bar(df, x=x_col, y=y_col, title=title)
-            fig.update_layout(xaxis_title=x_col, yaxis_title=y_col)
-    elif len(numeric_cols) >= 2:
-        # If no categorical columns, use the first numeric column for x and second for y
-        fig = px.bar(df, x=numeric_cols[0], y=numeric_cols[1], title=title)
-        fig.update_layout(xaxis_title=numeric_cols[0], yaxis_title=numeric_cols[1])
-    else:
-        # If only one column or no valid columns, create a count plot
-        if len(df.columns) > 0:
-            first_col = df.columns[0]
-            count_df = df[first_col].value_counts().reset_index()
-            count_df.columns = [first_col, 'count']
-            fig = px.bar(count_df, x=first_col, y='count', title=title)
-            fig.update_layout(xaxis_title=first_col, yaxis_title='Count')
-        else:
-            # Empty dataframe
-            fig = go.Figure()
-            fig.update_layout(title=title)
-    
-    return fig
+        
+        # Format the layout
+        fig.update_layout(
+            xaxis_title=x_col,
+            yaxis_title=y_col,
+            template="plotly_white"
+        )
+        
+        return fig
+    except Exception as e:
+        # Fallback to a simpler chart if there's an error
+        print(f"Error creating bar chart: {str(e)}")
+        fig = px.bar(df, title=title)
+        return fig
 
 def create_line_chart(df, title):
     """Create a line chart from dataframe."""
-    # For a line chart, we'd prefer a date/time column and a numeric column
-    date_cols = [col for col in df.columns if pd.api.types.is_datetime64_any_dtype(df[col])]
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    # Identify potential x and y columns
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    datetime_cols = df.select_dtypes(include=['datetime']).columns.tolist()
     
-    if date_cols and len(numeric_cols) > 0:
-        # Use the first date column for x-axis and first numeric for y-axis
-        fig = px.line(df, x=date_cols[0], y=numeric_cols[0], title=title)
-        fig.update_layout(xaxis_title=date_cols[0], yaxis_title=numeric_cols[0])
+    # Default columns
+    if datetime_cols and numeric_cols:
+        x_col = datetime_cols[0]  # First datetime column as x-axis
+        y_col = numeric_cols[0]  # First numeric column as y-axis
     elif len(numeric_cols) >= 2:
-        # If no date columns, use the first numeric column for x and second for y
-        fig = px.line(df, x=numeric_cols[0], y=numeric_cols[1], title=title)
-        fig.update_layout(xaxis_title=numeric_cols[0], yaxis_title=numeric_cols[1])
+        x_col = numeric_cols[0]  # First numeric column as x-axis
+        y_col = numeric_cols[1]  # Second numeric column as y-axis
+    elif numeric_cols and len(df.columns) >= 2:
+        x_col = df.columns[0] if df.columns[0] != numeric_cols[0] else df.columns[1]  # Non-numeric column as x-axis
+        y_col = numeric_cols[0]  # Numeric column as y-axis
     else:
-        # If only one numeric column, use index as x-axis
-        if len(numeric_cols) > 0:
-            fig = px.line(df, y=numeric_cols[0], title=title)
-            fig.update_layout(xaxis_title='Index', yaxis_title=numeric_cols[0])
-        else:
-            # No numeric columns
-            fig = go.Figure()
-            fig.update_layout(title=title)
+        # Fallback if we can't determine appropriate columns
+        x_col = df.columns[0]
+        y_col = df.columns[1] if len(df.columns) > 1 else df.columns[0]
     
-    return fig
+    # Check for color column (if there's a categorical column)
+    color_col = categorical_cols[0] if categorical_cols else None
+    
+    # Create the line chart
+    try:
+        if color_col:
+            fig = px.line(df, x=x_col, y=y_col, color=color_col, title=title)
+        else:
+            fig = px.line(df, x=x_col, y=y_col, title=title)
+        
+        # Format the layout
+        fig.update_layout(
+            xaxis_title=x_col,
+            yaxis_title=y_col,
+            template="plotly_white"
+        )
+        
+        return fig
+    except Exception as e:
+        # Fallback to a simpler chart if there's an error
+        print(f"Error creating line chart: {str(e)}")
+        fig = px.line(df, title=title)
+        return fig
 
 def create_scatter_plot(df, title):
     """Create a scatter plot from dataframe."""
-    # For a scatter plot, we need at least two numeric columns
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    # Identify potential x and y columns
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
     
+    # Default columns
     if len(numeric_cols) >= 2:
-        # Use the first two numeric columns for x and y
-        x_col = numeric_cols[0]
-        y_col = numeric_cols[1]
-        
-        # If there's a third numeric column, use it for size
-        size_col = numeric_cols[2] if len(numeric_cols) > 2 else None
-        
-        # If there's a categorical column, use it for color
-        categorical_cols = df.select_dtypes(include=['object', 'category']).columns
-        color_col = categorical_cols[0] if len(categorical_cols) > 0 else None
-        
-        if size_col and color_col:
-            fig = px.scatter(df, x=x_col, y=y_col, size=size_col, color=color_col, title=title)
+        x_col = numeric_cols[0]  # First numeric column as x-axis
+        y_col = numeric_cols[1]  # Second numeric column as y-axis
+    elif numeric_cols and len(df.columns) >= 2:
+        x_col = df.columns[0] if df.columns[0] != numeric_cols[0] else df.columns[1]  # Non-numeric column as x-axis
+        y_col = numeric_cols[0]  # Numeric column as y-axis
+    else:
+        # Fallback if we can't determine appropriate columns
+        x_col = df.columns[0]
+        y_col = df.columns[1] if len(df.columns) > 1 else df.columns[0]
+    
+    # Check for color column and size column
+    color_col = categorical_cols[0] if categorical_cols else None
+    size_col = numeric_cols[2] if len(numeric_cols) > 2 else None
+    
+    # Create the scatter plot
+    try:
+        if color_col and size_col:
+            fig = px.scatter(df, x=x_col, y=y_col, color=color_col, size=size_col, title=title)
         elif color_col:
             fig = px.scatter(df, x=x_col, y=y_col, color=color_col, title=title)
         elif size_col:
@@ -272,156 +321,188 @@ def create_scatter_plot(df, title):
         else:
             fig = px.scatter(df, x=x_col, y=y_col, title=title)
         
-        fig.update_layout(xaxis_title=x_col, yaxis_title=y_col)
-    else:
-        # Not enough numeric columns
-        fig = go.Figure()
-        fig.update_layout(title=title)
-    
-    return fig
+        # Format the layout
+        fig.update_layout(
+            xaxis_title=x_col,
+            yaxis_title=y_col,
+            template="plotly_white"
+        )
+        
+        return fig
+    except Exception as e:
+        # Fallback to a simpler chart if there's an error
+        print(f"Error creating scatter plot: {str(e)}")
+        fig = px.scatter(df, title=title)
+        return fig
 
 def create_pie_chart(df, title):
     """Create a pie chart from dataframe."""
-    # For a pie chart, we need one categorical and one numeric column
-    categorical_cols = df.select_dtypes(include=['object', 'category']).columns
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    # Identify potential name and value columns
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
     
-    if len(categorical_cols) > 0 and len(numeric_cols) > 0:
-        # Use the first categorical column for names and first numeric for values
-        names_col = categorical_cols[0]
-        values_col = numeric_cols[0]
-        
-        # If too many categories, limit to top 8
-        if df[names_col].nunique() > 8:
-            # Group data by category and sum values
-            grouped_df = df.groupby(names_col)[values_col].sum().reset_index()
-            
-            # Get top 7 categories
-            top_categories = grouped_df.sort_values(values_col, ascending=False).head(7)
-            
-            # Create "Other" category for the rest
-            other_value = grouped_df[~grouped_df[names_col].isin(top_categories[names_col])][values_col].sum()
-            other_df = pd.DataFrame({names_col: ['Other'], values_col: [other_value]})
-            
-            # Combine top categories with "Other"
-            plot_df = pd.concat([top_categories, other_df])
-            
-            fig = px.pie(plot_df, names=names_col, values=values_col, title=title)
-        else:
-            # Group data by category and sum values
-            grouped_df = df.groupby(names_col)[values_col].sum().reset_index()
-            fig = px.pie(grouped_df, names=names_col, values=values_col, title=title)
-    elif len(categorical_cols) > 0:
-        # If only categorical columns, use value counts
-        count_df = df[categorical_cols[0]].value_counts().reset_index()
-        count_df.columns = [categorical_cols[0], 'count']
-        
-        # If too many categories, limit to top 8
-        if count_df.shape[0] > 8:
-            top_categories = count_df.head(7)
-            other_value = count_df.iloc[7:]['count'].sum()
-            other_df = pd.DataFrame({categorical_cols[0]: ['Other'], 'count': [other_value]})
-            plot_df = pd.concat([top_categories, other_df])
-            fig = px.pie(plot_df, names=categorical_cols[0], values='count', title=title)
-        else:
-            fig = px.pie(count_df, names=categorical_cols[0], values='count', title=title)
+    # Default columns
+    if categorical_cols and numeric_cols:
+        names = categorical_cols[0]  # First categorical column for names
+        values = numeric_cols[0]  # First numeric column for values
+    elif len(df.columns) >= 2:
+        names = df.columns[0]  # First column for names
+        values = df.columns[1]  # Second column for values
     else:
-        # No suitable columns
-        fig = go.Figure()
-        fig.update_layout(title=title)
+        # Fallback if we can't determine appropriate columns
+        names = df.index.name or 'index'
+        values = df.columns[0]
+        df = df.reset_index()
     
-    return fig
+    # Create the pie chart
+    try:
+        fig = px.pie(df, names=names, values=values, title=title)
+        
+        # Format the layout
+        fig.update_layout(
+            template="plotly_white"
+        )
+        
+        return fig
+    except Exception as e:
+        # Fallback to a simpler chart if there's an error
+        print(f"Error creating pie chart: {str(e)}")
+        fig = px.pie(df, title=title)
+        return fig
 
 def create_histogram(df, title):
     """Create a histogram from dataframe."""
-    # For a histogram, we need at least one numeric column
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    # Identify potential column for histogram
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
     
-    if len(numeric_cols) > 0:
-        # Use the first numeric column
-        x_col = numeric_cols[0]
-        
-        # If there's a categorical column, use it for color
-        categorical_cols = df.select_dtypes(include=['object', 'category']).columns
-        color_col = categorical_cols[0] if len(categorical_cols) > 0 else None
-        
+    # Default column
+    if numeric_cols:
+        x_col = numeric_cols[0]  # First numeric column for histogram
+    else:
+        # Fallback if we can't determine appropriate column
+        x_col = df.columns[0]
+    
+    # Check for color column
+    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    color_col = categorical_cols[0] if categorical_cols else None
+    
+    # Create the histogram
+    try:
         if color_col:
             fig = px.histogram(df, x=x_col, color=color_col, title=title)
         else:
             fig = px.histogram(df, x=x_col, title=title)
         
-        fig.update_layout(xaxis_title=x_col, yaxis_title='Count')
-    else:
-        # No numeric columns
-        fig = go.Figure()
-        fig.update_layout(title=title)
-    
-    return fig
+        # Format the layout
+        fig.update_layout(
+            xaxis_title=x_col,
+            yaxis_title="Count",
+            template="plotly_white"
+        )
+        
+        return fig
+    except Exception as e:
+        # Fallback to a simpler chart if there's an error
+        print(f"Error creating histogram: {str(e)}")
+        fig = px.histogram(df, title=title)
+        return fig
 
 def create_heatmap(df, title):
     """Create a heatmap from dataframe."""
-    # For a heatmap, we need numeric columns
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    
-    if len(numeric_cols) > 1:
-        # Calculate correlation matrix
-        corr_matrix = df[numeric_cols].corr()
+    # For a heatmap, we need a pivot table or correlation matrix
+    try:
+        # If we have numeric columns, create a correlation matrix
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+        if len(numeric_cols) >= 2:
+            corr_df = df[numeric_cols].corr()
+            fig = go.Figure(data=go.Heatmap(
+                z=corr_df.values,
+                x=corr_df.columns,
+                y=corr_df.columns,
+                colorscale='Viridis'
+            ))
+            fig.update_layout(title=title + " (Correlation Matrix)")
+        else:
+            # If we have categorical columns, try to create a pivot table
+            categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+            if len(categorical_cols) >= 2 and numeric_cols:
+                pivot_df = pd.pivot_table(
+                    df, 
+                    values=numeric_cols[0], 
+                    index=categorical_cols[0], 
+                    columns=categorical_cols[1], 
+                    aggfunc='mean'
+                )
+                fig = go.Figure(data=go.Heatmap(
+                    z=pivot_df.values,
+                    x=pivot_df.columns,
+                    y=pivot_df.index,
+                    colorscale='Viridis'
+                ))
+                fig.update_layout(title=title)
+            else:
+                # If we can't create a meaningful heatmap, fallback to a basic heatmap
+                fig = go.Figure(data=go.Heatmap(
+                    z=df.values,
+                    x=df.columns,
+                    y=df.index,
+                    colorscale='Viridis'
+                ))
+                fig.update_layout(title=title)
         
-        # Create heatmap
-        fig = go.Figure(data=go.Heatmap(
-            z=corr_matrix.values,
-            x=corr_matrix.columns,
-            y=corr_matrix.columns,
-            colorscale='RdBu_r',
-            zmin=-1, zmax=1
-        ))
-        
+        # Format the layout
         fig.update_layout(
-            title=title,
-            xaxis_title='Features',
-            yaxis_title='Features',
-            height=600,
-            width=800
+            template="plotly_white"
         )
-    else:
-        # Not enough numeric columns
-        fig = go.Figure()
-        fig.update_layout(title=title)
-    
-    return fig
+        
+        return fig
+    except Exception as e:
+        # Fallback to a simpler chart if there's an error
+        print(f"Error creating heatmap: {str(e)}")
+        fig = px.imshow(df.corr() if len(df.select_dtypes(include=['number']).columns) > 1 else df, title=title)
+        return fig
 
 def create_box_plot(df, title):
     """Create a box plot from dataframe."""
-    # For a box plot, we need one numeric column and possibly one categorical
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    categorical_cols = df.select_dtypes(include=['object', 'category']).columns
+    # Identify potential columns for box plot
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
     
-    if len(numeric_cols) > 0:
-        # Use the first numeric column for y-axis
-        y_col = numeric_cols[0]
-        
-        if len(categorical_cols) > 0:
-            # Use the first categorical column for x-axis
-            x_col = categorical_cols[0]
-            
-            # If too many categories, limit to top 10
-            if df[x_col].nunique() > 10:
-                top_categories = df[x_col].value_counts().nlargest(10).index
-                filtered_df = df[df[x_col].isin(top_categories)]
-                fig = px.box(filtered_df, x=x_col, y=y_col, title=title)
-            else:
-                fig = px.box(df, x=x_col, y=y_col, title=title)
-        else:
-            # No categorical column, use just the numeric column
-            fig = px.box(df, y=y_col, title=title)
-        
-        if len(categorical_cols) > 0:
-            fig.update_layout(xaxis_title=x_col, yaxis_title=y_col)
-        else:
-            fig.update_layout(yaxis_title=y_col)
+    # Default columns
+    if numeric_cols and categorical_cols:
+        y = numeric_cols[0]  # First numeric column for values
+        x = categorical_cols[0]  # First categorical column for categories
+    elif numeric_cols:
+        y = numeric_cols[0]  # First numeric column for values
+        x = None  # No categories
     else:
-        # No numeric columns
-        fig = go.Figure()
-        fig.update_layout(title=title)
+        # Fallback if we can't determine appropriate columns
+        y = df.columns[0]
+        x = None
     
-    return fig
+    # Check for color column
+    color_col = categorical_cols[0] if categorical_cols else None
+    
+    # Create the box plot
+    try:
+        if x and color_col and x != color_col:
+            fig = px.box(df, x=x, y=y, color=color_col, title=title)
+        elif x:
+            fig = px.box(df, x=x, y=y, title=title)
+        else:
+            fig = px.box(df, y=y, title=title)
+        
+        # Format the layout
+        fig.update_layout(
+            yaxis_title=y,
+            template="plotly_white"
+        )
+        if x:
+            fig.update_layout(xaxis_title=x)
+        
+        return fig
+    except Exception as e:
+        # Fallback to a simpler chart if there's an error
+        print(f"Error creating box plot: {str(e)}")
+        fig = px.box(df, title=title)
+        return fig

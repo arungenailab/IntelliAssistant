@@ -1,20 +1,19 @@
 import os
 import base64
 import google.generativeai as genai
-from PIL import Image
 import io
+import json
 import pandas as pd
 import re
+import time
+from PIL import Image
+from typing import Tuple, Dict, List, Any, Optional, Union
 
-# Use the same Gemini API key from gemini_helper
+# Set API key from environment
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable not set")
-
-# Configure the API
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Default model for image analysis
+# Default model for multimodal
 DEFAULT_VISION_MODEL = "models/gemini-1.5-pro"
 
 def encode_image_to_base64(image_path):
@@ -28,7 +27,8 @@ def encode_image_to_base64(image_path):
         str: Base64 encoded image string
     """
     with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode('utf-8')
+        encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+    return encoded_string
 
 def analyze_image(image_path, prompt=None):
     """
@@ -41,38 +41,47 @@ def analyze_image(image_path, prompt=None):
     Returns:
         str: Analysis result
     """
-    try:
-        # Create model instance
-        model = genai.GenerativeModel(DEFAULT_VISION_MODEL)
-        
-        # Encode image
-        encoded_image = encode_image_to_base64(image_path)
-        
-        # Prepare the prompt
-        if not prompt:
-            prompt = "Analyze this image in detail. Describe what you see, including any text, objects, people, or interesting elements."
-        
-        # Create the message with text and image parts
-        message = {
-            "role": "user",
-            "parts": [
-                {"text": prompt},
-                {
-                    "inline_data": {
-                        "mime_type": "image/jpeg",
-                        "data": encoded_image
-                    }
-                }
-            ]
-        }
-        
-        # Generate content
-        response = model.generate_content([message])
-        
-        return response.text
+    # Default prompt if none is provided
+    if not prompt:
+        prompt = """
+        Analyze this image in detail. 
+        Describe what you see, the main elements, any text content, and the overall context.
+        If there are any charts, graphs, or tables, describe their content and purpose.
+        If there's text in the image, include it in your analysis.
+        """
     
-    except Exception as e:
-        return f"Error analyzing image: {str(e)}"
+    # Maximum number of retries
+    max_retries = 3
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            # Load the image
+            img = Image.open(image_path)
+            
+            # Create model
+            model = genai.GenerativeModel(DEFAULT_VISION_MODEL)
+            
+            # Convert image to correct format for the model
+            img_byte_arr = io.BytesIO()
+            img.save(img_byte_arr, format=img.format or 'PNG')
+            img_byte_arr = img_byte_arr.getvalue()
+            
+            # Create multimodal content parts
+            response = model.generate_content([prompt, {"mime_type": f"image/{img.format.lower() if img.format else 'png'}", "data": img_byte_arr}])
+            
+            # Return the response text
+            return response.text
+        
+        except Exception as e:
+            retry_count += 1
+            if retry_count >= max_retries:
+                return f"Error analyzing image after {max_retries} retries: {str(e)}"
+            
+            # Exponential backoff
+            wait_time = 2 ** retry_count
+            print(f"Error analyzing image: {str(e)}. Retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
 
 def extract_data_from_image(image_path, extraction_type="table"):
     """
@@ -87,108 +96,71 @@ def extract_data_from_image(image_path, extraction_type="table"):
             - extracted_data: DataFrame or text
             - format_type: Type of extracted data ("dataframe", "text")
     """
+    # Create extraction prompt based on type
+    if extraction_type == "table":
+        prompt = """
+        Extract the table data visible in this image.
+        Represent the table data as a formatted markdown table.
+        Make sure to include all rows and columns.
+        Only include the table data, nothing else.
+        Make sure the data is accurately transcribed.
+        """
+    elif extraction_type == "chart":
+        prompt = """
+        Extract the data from this chart/graph image.
+        Represent the underlying data as a markdown table with headers.
+        Include all data points visible in the chart.
+        If exact values are not clear, provide best estimates.
+        """
+    elif extraction_type == "form":
+        prompt = """
+        Extract all form fields and their values from this image.
+        Format the results as a markdown table with two columns: Field and Value.
+        Include all visible form fields and their corresponding values.
+        """
+    else:  # text
+        prompt = """
+        Extract all text content visible in this image.
+        Preserve the structure and formatting as much as possible.
+        Include all paragraphs, bullet points, headings, etc.
+        Do not add any interpretations or analysis.
+        """
+    
     try:
-        # Create model instance
-        model = genai.GenerativeModel(DEFAULT_VISION_MODEL)
+        # Use the image analyzer to get the text response
+        extraction_result = analyze_image(image_path, prompt)
         
-        # Encode image
-        encoded_image = encode_image_to_base64(image_path)
-        
-        # Create specific prompt based on extraction type
-        if extraction_type == "table":
-            prompt = """
-            Extract the data from this table image into a structured format. 
-            Return the data as a CSV with headers. 
-            Format your response as follows:
-            
-            EXTRACTED_DATA:
-            column1,column2,column3
-            value1,value2,value3
-            value4,value5,value6
-            
-            Do not include any explanations, just the CSV data.
-            """
-        elif extraction_type == "chart":
-            prompt = """
-            Extract the data represented in this chart or graph.
-            Return the underlying data as a CSV with headers.
-            Format your response as follows:
-            
-            EXTRACTED_DATA:
-            x_axis,y_axis
-            value1,value2
-            value3,value4
-            
-            Include a brief description of what the chart represents.
-            """
-        elif extraction_type == "form":
-            prompt = """
-            Extract all form fields and their values from this image.
-            Format your response as follows:
-            
-            EXTRACTED_DATA:
-            field1,value1
-            field2,value2
-            field3,value3
-            
-            Do not include any explanations, just the extracted fields and values.
-            """
-        else:  # Default to text extraction
-            prompt = """
-            Extract all text from this image.
-            Format your response as follows:
-            
-            EXTRACTED_TEXT:
-            [all extracted text here]
-            
-            Preserve paragraphs, bullet points, and other formatting elements.
-            """
-        
-        # Create the message with text and image parts
-        message = {
-            "role": "user",
-            "parts": [
-                {"text": prompt},
-                {
-                    "inline_data": {
-                        "mime_type": "image/jpeg",
-                        "data": encoded_image
-                    }
-                }
-            ]
-        }
-        
-        # Generate content
-        response = model.generate_content([message])
-        response_text = response.text
-        
-        # Process the response based on extraction type
+        # For tables, charts, and forms, try to convert to a DataFrame
         if extraction_type in ["table", "chart", "form"]:
-            # Try to extract CSV data
-            csv_pattern = r"EXTRACTED_DATA:[\r\n]+([\s\S]+)"
-            csv_match = re.search(csv_pattern, response_text)
-            
-            if csv_match:
-                csv_text = csv_match.group(1).strip()
+            # Check if there's a markdown table in the result
+            if "|" in extraction_result and "-|-" in extraction_result.replace(" ", ""):
+                # Extract the table data
                 try:
-                    # Convert CSV to DataFrame
-                    df = pd.read_csv(io.StringIO(csv_text), sep=",", skipinitialspace=True)
+                    # Parse markdown table (very basic parser)
+                    lines = [line.strip() for line in extraction_result.split('\n') if line.strip() and '|' in line]
+                    
+                    # Skip separator lines (containing only |, -, and spaces)
+                    lines = [line for line in lines if not all(c in '|-+ ' for c in line)]
+                    
+                    # Split by | and remove empty cells from start/end
+                    rows = [row.split('|') for row in lines]
+                    rows = [[cell.strip() for cell in row if cell.strip()] for row in rows]
+                    
+                    # First row as headers
+                    headers = rows[0] if rows else []
+                    data = rows[1:] if len(rows) > 1 else []
+                    
+                    # Create DataFrame
+                    df = pd.DataFrame(data, columns=headers)
                     return df, "dataframe"
-                except Exception as e:
-                    # If CSV parsing fails, return the text
-                    return csv_text, "text"
-            else:
-                # If no CSV format found, return the raw response
-                return response_text, "text"
-        else:
-            # For text extraction
-            text_pattern = r"EXTRACTED_TEXT:[\r\n]+([\s\S]+)"
-            text_match = re.search(text_pattern, response_text)
+                except Exception as table_error:
+                    print(f"Error converting to DataFrame: {str(table_error)}")
             
-            if text_match:
-                return text_match.group(1).strip(), "text"
-            else:
-                return response_text, "text"
+            # If table parsing failed, return the text
+            return extraction_result, "text"
+        else:
+            # For text extraction, just return the result
+            return extraction_result, "text"
     
     except Exception as e:
         return f"Error extracting data from image: {str(e)}", "text"
@@ -203,75 +175,171 @@ def analyze_image_data_trends(image_path):
     Returns:
         dict: Analysis results with extracted insights
     """
+    prompt = """
+    Analyze this chart/graph image and provide detailed insights.
+    
+    Your analysis should include:
+    1. Type of chart/graph (bar, line, pie, scatter, etc.)
+    2. Main trend or pattern shown
+    3. Key data points and their significance
+    4. Any anomalies or outliers
+    5. Potential conclusions that can be drawn
+    
+    If possible, also extract the underlying data in a structured format.
+    
+    Format your response as JSON with these fields:
+    {
+      "chart_type": "The type of chart/graph",
+      "main_trend": "Brief description of the main trend",
+      "key_points": ["List of key insights"],
+      "conclusions": ["List of potential conclusions"],
+      "extracted_data": [{"x": value, "y": value}, ...] or appropriate structure
+    }
+    """
+    
     try:
-        # First, extract the data from the chart
-        data, format_type = extract_data_from_image(image_path, extraction_type="chart")
+        # Analyze the image
+        analysis_result = analyze_image(image_path, prompt)
         
-        # Now ask for insights based on the extracted data or directly from the image
-        insight_prompt = """
-        This image contains a chart or graph. Analyze it and provide the following insights:
-        
-        1. What type of chart/graph is this?
-        2. What is the main trend or pattern shown?
-        3. What are the key data points or outliers?
-        4. What conclusions can be drawn from this visualization?
-        
-        Format your response as JSON with the following structure:
-        {
-            "chart_type": "type of chart/graph",
-            "main_trend": "description of main trend",
-            "key_points": ["point 1", "point 2", "point 3"],
-            "conclusions": ["conclusion 1", "conclusion 2"]
-        }
-        """
-        
-        # Create model instance
-        model = genai.GenerativeModel(DEFAULT_VISION_MODEL)
-        
-        # Encode image
-        encoded_image = encode_image_to_base64(image_path)
-        
-        # Create the message with text and image parts
-        message = {
-            "role": "user",
-            "parts": [
-                {"text": insight_prompt},
-                {
-                    "inline_data": {
-                        "mime_type": "image/jpeg",
-                        "data": encoded_image
-                    }
-                }
-            ]
-        }
-        
-        # Generate content
-        response = model.generate_content([message])
-        response_text = response.text
-        
-        # Try to extract JSON
+        # Try to extract JSON from the response
         try:
-            # Find JSON pattern
-            json_pattern = r"\{[\s\S]*\}"
-            json_match = re.search(json_pattern, response_text)
-            
+            # Check if response contains JSON
+            json_match = re.search(r'```json\s*({.*?})\s*```', analysis_result, re.DOTALL)
             if json_match:
-                import json
-                insights = json.loads(json_match.group(0))
-                # Add the extracted data if available
-                if format_type == "dataframe":
-                    insights["extracted_data"] = data.to_dict(orient="records")
-                return insights
-        except:
-            pass
+                json_str = json_match.group(1)
+                return json.loads(json_str)
+            
+            # Try direct JSON parsing
+            json_match = re.search(r'{.*}', analysis_result, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                return json.loads(json_str)
+            
+            # If we couldn't extract JSON, return the raw analysis
+            return {"analysis": analysis_result}
         
-        # If JSON extraction fails, return a simpler structure
-        return {
-            "analysis": response_text,
-            "extracted_data": data if format_type == "dataframe" else None
-        }
+        except json.JSONDecodeError:
+            # Return raw analysis if JSON parsing fails
+            return {"analysis": analysis_result}
     
     except Exception as e:
-        return {
-            "error": f"Error analyzing image data trends: {str(e)}"
+        return {"error": f"Error analyzing trends: {str(e)}"}
+    
+def ocr_document(image_path):
+    """
+    Perform Optical Character Recognition on a document image.
+    
+    Args:
+        image_path (str): Path to the image file
+        
+    Returns:
+        dict: OCR results with extracted text and structure
+    """
+    prompt = """
+    Perform OCR on this document image. Extract all text content with proper formatting.
+    
+    Your extraction should:
+    1. Preserve paragraphs and line breaks
+    2. Maintain headings and subheadings hierarchy
+    3. Identify tables and lists
+    4. Note any text that may be unclear or have low confidence
+    
+    Format your response as JSON with these fields:
+    {
+      "full_text": "The complete extracted text",
+      "sections": [
+        {
+          "type": "heading/paragraph/list/table",
+          "content": "The section content"
         }
+      ],
+      "confidence": "high/medium/low"
+    }
+    """
+    
+    try:
+        # Analyze the image
+        ocr_result = analyze_image(image_path, prompt)
+        
+        # Try to extract JSON from the response
+        try:
+            # Check if response contains JSON
+            json_match = re.search(r'```json\s*({.*?})\s*```', ocr_result, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+                return json.loads(json_str)
+            
+            # Try direct JSON parsing
+            json_match = re.search(r'{.*}', ocr_result, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                return json.loads(json_str)
+            
+            # If we couldn't extract JSON, return the raw text as full_text
+            return {
+                "full_text": ocr_result,
+                "sections": [{"type": "paragraph", "content": ocr_result}],
+                "confidence": "medium"
+            }
+        
+        except json.JSONDecodeError:
+            # Return basic structure if JSON parsing fails
+            return {
+                "full_text": ocr_result,
+                "sections": [{"type": "paragraph", "content": ocr_result}],
+                "confidence": "medium"
+            }
+    
+    except Exception as e:
+        return {"error": f"Error performing OCR: {str(e)}"}
+
+def extract_table_from_image(image_path):
+    """
+    Extract specifically a data table from an image.
+    
+    Args:
+        image_path (str): Path to the image file
+        
+    Returns:
+        DataFrame: Extracted table data
+    """
+    prompt = """
+    Extract the data table from this image. Format the data as a clean markdown table.
+    Include all rows and columns with proper alignment. 
+    Include column headers if present.
+    Do not include any text outside the table.
+    Only return the markdown table, nothing else.
+    """
+    
+    extracted_data, format_type = extract_data_from_image(image_path, "table")
+    
+    if format_type == "dataframe":
+        return extracted_data
+    else:
+        # If we didn't get a dataframe directly, try to create one from the text
+        try:
+            # Check if there's a markdown table in the result
+            if isinstance(extracted_data, str) and "|" in extracted_data and "-|-" in extracted_data.replace(" ", ""):
+                # Parse markdown table
+                lines = [line.strip() for line in extracted_data.split('\n') if line.strip() and '|' in line]
+                
+                # Skip separator lines
+                lines = [line for line in lines if not all(c in '|-+ ' for c in line)]
+                
+                # Split by | and remove empty cells
+                rows = [row.split('|') for row in lines]
+                rows = [[cell.strip() for cell in row if cell.strip()] for row in rows]
+                
+                # First row as headers
+                headers = rows[0] if rows else []
+                data = rows[1:] if len(rows) > 1 else []
+                
+                # Create DataFrame
+                return pd.DataFrame(data, columns=headers)
+            
+            # If no table found, return empty DataFrame
+            return pd.DataFrame()
+        
+        except Exception as e:
+            print(f"Error extracting table: {str(e)}")
+            return pd.DataFrame()
