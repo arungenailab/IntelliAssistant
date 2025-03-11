@@ -1,25 +1,25 @@
 import os
 import json
 import google.generativeai as genai
+import time
+import re
 
-# Get Gemini API key from environment variable
+# Set up the API key
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY environment variable not set")
 
-# Configure the Gemini API
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    
-    # List available models to check what's supported
-    try:
-        print("Available Gemini models:")
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                print(f"- {m.name}")
-    except Exception as e:
-        print(f"Error listing models: {str(e)}")
+# Configure the API
+genai.configure(api_key=GEMINI_API_KEY)
 
-# Use the correct model name format
+# Set the default model
 DEFAULT_MODEL = "models/gemini-1.5-pro"
+
+# List available models for debugging
+print("Available Gemini models:")
+for model in genai.list_models():
+    if "gemini" in model.name:
+        print(f"- {model.name}")
 
 def query_gemini(user_query, system_prompt=None, model=DEFAULT_MODEL):
     """
@@ -33,29 +33,37 @@ def query_gemini(user_query, system_prompt=None, model=DEFAULT_MODEL):
     Returns:
         str: The model's response
     """
-    try:
-        # Configure the model
-        generation_config = {
-            "temperature": 0.2,  # Low temperature for more deterministic responses
-            "top_p": 0.95,
-            "top_k": 40,
-            "max_output_tokens": 2048,
-        }
+    # Maximum number of retries
+    max_retries = 3
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            # Create model instance
+            model_instance = genai.GenerativeModel(model)
+            
+            # Prepare the prompt
+            if system_prompt:
+                messages = [
+                    {"role": "system", "parts": [system_prompt]},
+                    {"role": "user", "parts": [user_query]}
+                ]
+                response = model_instance.generate_content(messages)
+            else:
+                response = model_instance.generate_content(user_query)
+            
+            # Extract and return the text response
+            return response.text
         
-        # Create the prompt
-        prompt = ""
-        if system_prompt:
-            prompt += f"{system_prompt}\n\n"
-        prompt += user_query
-        
-        # Generate content
-        model_instance = genai.GenerativeModel(model_name=model,
-                                    generation_config=generation_config)
-        response = model_instance.generate_content(prompt)
-        
-        return response.text
-    except Exception as e:
-        raise Exception(f"Gemini API error: {str(e)}")
+        except Exception as e:
+            retry_count += 1
+            if retry_count >= max_retries:
+                raise Exception(f"Failed to query Gemini after {max_retries} attempts: {str(e)}")
+            
+            # Exponential backoff
+            wait_time = 2 ** retry_count
+            print(f"Error querying Gemini: {str(e)}. Retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
 
 def generate_sql_query(user_query, available_sources, dataframes_info=None):
     """
@@ -69,22 +77,26 @@ def generate_sql_query(user_query, available_sources, dataframes_info=None):
     Returns:
         str: The generated SQL-like query
     """
+    # Create a system prompt
     system_prompt = f"""
-    You are an assistant that converts natural language queries into SQL-like queries.
-    Available data sources: {', '.join(available_sources)}
+    You are an expert SQL query generator.
     
-    For each data source, here are the available columns:
+    The user is trying to query their data using natural language.
+    Convert the natural language query into a SQL query that can be executed.
+    
+    Available data sources: {', '.join(available_sources)}
     """
     
     if dataframes_info:
-        for source, info in dataframes_info.items():
-            if source in available_sources:
-                system_prompt += f"\n{source}: {', '.join(info['columns'])}"
+        system_prompt += "\n\nInformation about available data sources:\n"
+        for df_name, info in dataframes_info.items():
+            system_prompt += f"\n{df_name}:\n"
+            system_prompt += f"- Columns: {', '.join(info.get('columns', []))}\n"
+            system_prompt += f"- Types: {info.get('types', {})}\n"
     
     system_prompt += """
-    Generate a SQL-like query that would answer the user's question. 
-    If multiple data sources are needed, include JOIN operations.
-    If visualization is requested, include appropriate GROUP BY or aggregate functions.
+    Return ONLY the SQL query without any explanation or additional text.
+    Don't use backticks or other markdown formatting.
     """
     
     try:

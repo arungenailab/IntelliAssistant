@@ -1,1 +1,1 @@
-# Initialize the utils package
+# Utility modules for Analytical Chat Bot
