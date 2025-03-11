@@ -1,9 +1,7 @@
 import os
 import pandas as pd
-import sqlalchemy
-from sqlalchemy import create_engine, text
-import psycopg2
-from urllib.parse import quote_plus
+import sqlalchemy as sa
+from sqlalchemy import text
 
 def connect_to_database(db_type):
     """
@@ -16,35 +14,41 @@ def connect_to_database(db_type):
         object: A database connection object
     """
     if db_type == "PostgreSQL":
-        # Get connection parameters from environment variables
-        host = os.environ.get("PGHOST", "localhost")
-        port = os.environ.get("PGPORT", "5432")
-        user = os.environ.get("PGUSER", "postgres")
-        password = os.environ.get("PGPASSWORD", "")
-        database = os.environ.get("PGDATABASE", "postgres")
-        
-        # Create connection string
-        conn_str = f"postgresql://{user}:{quote_plus(password)}@{host}:{port}/{database}"
-        
-        try:
-            # Create SQLAlchemy engine
-            engine = create_engine(conn_str)
+        # Use environment variable for PostgreSQL connection
+        db_url = os.environ.get("DATABASE_URL")
+        if not db_url:
+            # If DATABASE_URL is not set, try to construct it from individual env vars
+            host = os.environ.get("PGHOST", "localhost")
+            port = os.environ.get("PGPORT", "5432")
+            user = os.environ.get("PGUSER", "postgres")
+            password = os.environ.get("PGPASSWORD", "")
+            database = os.environ.get("PGDATABASE", "postgres")
             
-            # Test connection
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            
-            return engine
-        except Exception as e:
-            raise Exception(f"Failed to connect to PostgreSQL: {str(e)}")
+            db_url = f"postgresql://{user}:{password}@{host}:{port}/{database}"
+        
+        engine = sa.create_engine(db_url)
+        conn = engine.connect()
+        return conn
     
     elif db_type == "MySQL":
-        # Implementation for MySQL connection
-        raise NotImplementedError("MySQL connection not implemented yet")
+        # Check for MySQL connection details in environment variables
+        host = os.environ.get("MYSQL_HOST", "localhost")
+        port = os.environ.get("MYSQL_PORT", "3306")
+        user = os.environ.get("MYSQL_USER", "root")
+        password = os.environ.get("MYSQL_PASSWORD", "")
+        database = os.environ.get("MYSQL_DATABASE", "mysql")
+        
+        db_url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
+        
+        engine = sa.create_engine(db_url)
+        conn = engine.connect()
+        return conn
     
     elif db_type == "SQLite":
-        # Implementation for SQLite connection
-        raise NotImplementedError("SQLite connection not implemented yet")
+        # Use in-memory SQLite database for simplicity
+        engine = sa.create_engine("sqlite:///:memory:")
+        conn = engine.connect()
+        return conn
     
     else:
         raise ValueError(f"Unsupported database type: {db_type}")
@@ -62,36 +66,23 @@ def execute_query(conn, query, params=None):
         DataFrame: Query results as a pandas DataFrame
     """
     try:
-        if isinstance(conn, sqlalchemy.engine.Engine):
-            # SQLAlchemy engine
-            if params:
-                result = pd.read_sql(text(query), conn, params=params)
-            else:
-                result = pd.read_sql(text(query), conn)
-            return result
-        
-        elif isinstance(conn, psycopg2.extensions.connection):
-            # psycopg2 connection
-            cursor = conn.cursor()
-            if params:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
-            
-            # Fetch column names
-            columns = [desc[0] for desc in cursor.description] if cursor.description else []
-            
-            # Fetch data
-            data = cursor.fetchall()
-            
-            # Create DataFrame
-            return pd.DataFrame(data, columns=columns)
-        
+        if params:
+            # Execute query with parameters
+            result = conn.execute(text(query), params)
         else:
-            raise TypeError("Unsupported connection type")
+            # Execute query without parameters
+            result = conn.execute(text(query))
+        
+        # Convert results to a pandas DataFrame
+        if result.returns_rows:
+            df = pd.DataFrame(result.fetchall())
+            if len(df) > 0:
+                df.columns = result.keys()
+            return df
+        return pd.DataFrame()
     
     except Exception as e:
-        raise Exception(f"Query execution failed: {str(e)}")
+        raise Exception(f"Error executing query: {str(e)}")
 
 def list_tables(conn):
     """
@@ -104,27 +95,37 @@ def list_tables(conn):
         list: List of table names
     """
     try:
-        if isinstance(conn, sqlalchemy.engine.Engine):
-            # SQLAlchemy engine
-            inspector = sqlalchemy.inspect(conn)
-            return inspector.get_table_names()
-        
-        elif isinstance(conn, psycopg2.extensions.connection):
-            # psycopg2 connection
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT table_name 
-                FROM information_schema.tables 
-                WHERE table_schema = 'public'
-            """)
-            tables = [table[0] for table in cursor.fetchall()]
-            return tables
-        
+        # Check if we're using SQLAlchemy Engine or Connection
+        if hasattr(conn, 'engine'):
+            engine = conn.engine
+        elif hasattr(conn, 'connection'):
+            engine = conn.connection
         else:
-            raise TypeError("Unsupported connection type")
+            engine = conn
+        
+        # Get database dialect
+        dialect = engine.dialect.name
+        
+        # Execute dialect-specific query to get table names
+        if dialect == 'postgresql':
+            query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+        elif dialect == 'mysql':
+            query = "SHOW TABLES"
+        elif dialect == 'sqlite':
+            query = "SELECT name FROM sqlite_master WHERE type='table'"
+        else:
+            query = "SELECT table_name FROM information_schema.tables"
+        
+        result = execute_query(conn, query)
+        
+        # Extract table names from the result
+        if len(result) > 0:
+            table_names = result.iloc[:, 0].tolist()
+            return table_names
+        return []
     
     except Exception as e:
-        raise Exception(f"Failed to list tables: {str(e)}")
+        raise Exception(f"Error listing tables: {str(e)}")
 
 def get_table_schema(conn, table_name):
     """
@@ -138,28 +139,44 @@ def get_table_schema(conn, table_name):
         DataFrame: Table schema information
     """
     try:
-        if isinstance(conn, sqlalchemy.engine.Engine):
-            # SQLAlchemy engine
-            inspector = sqlalchemy.inspect(conn)
-            columns = inspector.get_columns(table_name)
-            return pd.DataFrame(columns, columns=['name', 'type', 'nullable', 'default'])
-        
-        elif isinstance(conn, psycopg2.extensions.connection):
-            # psycopg2 connection
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT column_name, data_type, is_nullable, column_default
-                FROM information_schema.columns
-                WHERE table_name = '{table_name}'
-            """)
-            schema = cursor.fetchall()
-            return pd.DataFrame(schema, columns=['name', 'type', 'nullable', 'default'])
-        
+        # Check if we're using SQLAlchemy Engine or Connection
+        if hasattr(conn, 'engine'):
+            engine = conn.engine
+        elif hasattr(conn, 'connection'):
+            engine = conn.connection
         else:
-            raise TypeError("Unsupported connection type")
+            engine = conn
+        
+        # Get database dialect
+        dialect = engine.dialect.name
+        
+        # Execute dialect-specific query to get column information
+        if dialect == 'postgresql':
+            query = f"""
+            SELECT column_name, data_type, is_nullable 
+            FROM information_schema.columns 
+            WHERE table_name = '{table_name}'
+            """
+        elif dialect == 'mysql':
+            query = f"""
+            SELECT column_name, data_type, is_nullable 
+            FROM information_schema.columns 
+            WHERE table_name = '{table_name}'
+            """
+        elif dialect == 'sqlite':
+            query = f"PRAGMA table_info('{table_name}')"
+        else:
+            query = f"""
+            SELECT column_name, data_type, is_nullable 
+            FROM information_schema.columns 
+            WHERE table_name = '{table_name}'
+            """
+        
+        result = execute_query(conn, query)
+        return result
     
     except Exception as e:
-        raise Exception(f"Failed to get table schema: {str(e)}")
+        raise Exception(f"Error getting table schema: {str(e)}")
 
 def execute_transaction(conn, queries):
     """
@@ -173,26 +190,22 @@ def execute_transaction(conn, queries):
         bool: True if transaction was successful
     """
     try:
-        if isinstance(conn, sqlalchemy.engine.Engine):
-            # SQLAlchemy engine
-            with conn.begin() as transaction:
-                for query in queries:
-                    conn.execute(text(query))
-            return True
+        # Start a transaction
+        transaction = conn.begin()
         
-        elif isinstance(conn, psycopg2.extensions.connection):
-            # psycopg2 connection
-            cursor = conn.cursor()
+        try:
+            # Execute each query in the transaction
             for query in queries:
-                cursor.execute(query)
-            conn.commit()
+                conn.execute(text(query))
+            
+            # Commit the transaction
+            transaction.commit()
             return True
         
-        else:
-            raise TypeError("Unsupported connection type")
+        except Exception as e:
+            # Rollback the transaction if an error occurs
+            transaction.rollback()
+            raise Exception(f"Transaction error: {str(e)}")
     
     except Exception as e:
-        # Rollback transaction on error
-        if isinstance(conn, psycopg2.extensions.connection):
-            conn.rollback()
-        raise Exception(f"Transaction failed: {str(e)}")
+        raise Exception(f"Error executing transaction: {str(e)}")

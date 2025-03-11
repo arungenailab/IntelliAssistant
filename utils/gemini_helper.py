@@ -8,8 +8,20 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # Configure the Gemini API
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
+    
+    # List available models to check what's supported
+    try:
+        print("Available Gemini models:")
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                print(f"- {m.name}")
+    except Exception as e:
+        print(f"Error listing models: {str(e)}")
 
-def query_gemini(user_query, system_prompt=None, model="gemini-pro"):
+# Use the correct model name format
+DEFAULT_MODEL = "models/gemini-1.5-pro"
+
+def query_gemini(user_query, system_prompt=None, model=DEFAULT_MODEL):
     """
     Query Gemini with user input and an optional system prompt.
     
@@ -37,9 +49,9 @@ def query_gemini(user_query, system_prompt=None, model="gemini-pro"):
         prompt += user_query
         
         # Generate content
-        model = genai.GenerativeModel(model_name=model,
+        model_instance = genai.GenerativeModel(model_name=model,
                                     generation_config=generation_config)
-        response = model.generate_content(prompt)
+        response = model_instance.generate_content(prompt)
         
         return response.text
     except Exception as e:
@@ -79,7 +91,7 @@ def generate_sql_query(user_query, available_sources, dataframes_info=None):
         response = query_gemini(
             user_query=user_query,
             system_prompt=system_prompt,
-            model="gemini-pro"
+            model=DEFAULT_MODEL
         )
         return response
     except Exception as e:
@@ -113,7 +125,7 @@ def suggest_query_improvements(user_query, data_context):
         response = query_gemini(
             user_query=user_query,
             system_prompt=system_prompt,
-            model="gemini-pro"
+            model=DEFAULT_MODEL
         )
         # Attempt to parse the response as JSON
         try:
@@ -169,7 +181,7 @@ def extract_visualization_parameters(user_query, data_sample):
         response = query_gemini(
             user_query=user_query,
             system_prompt=system_prompt,
-            model="gemini-pro"
+            model=DEFAULT_MODEL
         )
         # Attempt to parse the response as JSON
         try:
