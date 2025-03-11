@@ -1,51 +1,51 @@
 import os
 import json
 import time
-import threading
-from datetime import datetime, timedelta
-from queue import Queue
 import uuid
+import threading
+import queue
+import datetime
+from collections import defaultdict
 
-# Setup paths
+# Constants
+LOG_DIR = "data"
 LOG_FILE = "acb_usage_logs.jsonl"
-log_queue = Queue()
-stop_event = threading.Event()
+LOG_PATH = os.path.join(LOG_DIR, LOG_FILE)
+
+# Create log directory if it doesn't exist
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# Queue for threaded logging
+log_queue = queue.Queue()
+stop_logging = threading.Event()
 log_thread = None
 
 def initialize_logger():
     """Initialize the background logging thread."""
     global log_thread
     if log_thread is None or not log_thread.is_alive():
+        stop_logging.clear()
         log_thread = threading.Thread(target=log_worker, daemon=True)
         log_thread.start()
 
 def log_worker():
     """Worker thread to process the log queue and write to file."""
-    while not stop_event.is_set():
-        # Wait for log entries or check stop_event every second
-        if log_queue.empty():
-            time.sleep(1)
+    while not stop_logging.is_set():
+        try:
+            # Wait for log entries with a timeout
+            log_entry = log_queue.get(timeout=1.0)
+            
+            # Write to log file
+            with open(LOG_PATH, "a") as f:
+                f.write(json.dumps(log_entry) + "\n")
+            
+            log_queue.task_done()
+        except queue.Empty:
+            # Timeout occurred, check if we should stop
             continue
-        
-        # Process all available log entries
-        log_entries = []
-        while not log_queue.empty():
-            try:
-                log_entries.append(log_queue.get_nowait())
-                log_queue.task_done()
-            except:
-                break
-        
-        # Write log entries to file
-        if log_entries:
-            try:
-                with open(LOG_FILE, 'a') as f:
-                    for entry in log_entries:
-                        f.write(json.dumps(entry) + "\n")
-            except Exception as e:
-                print(f"Error writing to log file: {str(e)}")
-    
-    print("Log worker thread stopped")
+        except Exception as e:
+            print(f"Error in log worker: {str(e)}")
+            time.sleep(1)  # Avoid tight loop on error
 
 def log_action(user_id, action, details=None):
     """
@@ -57,8 +57,10 @@ def log_action(user_id, action, details=None):
         details (dict, optional): Additional details
     """
     # Create log entry
+    timestamp = datetime.datetime.now().isoformat()
     log_entry = {
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "id": str(uuid.uuid4()),
+        "timestamp": timestamp,
         "user_id": user_id,
         "action": action,
         "details": details or {}
@@ -67,7 +69,7 @@ def log_action(user_id, action, details=None):
     # Add to queue
     log_queue.put(log_entry)
     
-    # Ensure logger is initialized
+    # Make sure logger is running
     initialize_logger()
 
 def get_user_logs(user_id, limit=100):
@@ -81,30 +83,26 @@ def get_user_logs(user_id, limit=100):
     Returns:
         list: User logs
     """
-    user_logs = []
+    logs = []
     
     try:
-        if os.path.exists(LOG_FILE):
-            with open(LOG_FILE, 'r') as f:
+        if os.path.exists(LOG_PATH):
+            with open(LOG_PATH, "r") as f:
                 for line in f:
                     try:
                         log_entry = json.loads(line.strip())
                         if log_entry.get("user_id") == user_id:
-                            user_logs.append(log_entry)
-                            if len(user_logs) >= limit:
+                            logs.append(log_entry)
+                            if len(logs) >= limit:
                                 break
-                    except:
+                    except json.JSONDecodeError:
                         continue
     except Exception as e:
-        print(f"Error reading log file: {str(e)}")
+        print(f"Error reading logs: {str(e)}")
     
-    # Sort by timestamp in descending order (newest first)
-    user_logs.sort(
-        key=lambda x: datetime.strptime(x.get("timestamp", "1970-01-01 00:00:00"), "%Y-%m-%d %H:%M:%S"),
-        reverse=True
-    )
-    
-    return user_logs
+    # Sort by timestamp (newest first)
+    logs.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    return logs
 
 def get_resource_usage():
     """
@@ -113,65 +111,82 @@ def get_resource_usage():
     Returns:
         dict: Resource usage metrics
     """
-    usage = {
+    metrics = {
         "total_queries": 0,
-        "total_users": set(),
-        "queries_by_date": {},
-        "users_by_date": {},
-        "popular_actions": {}
+        "api_calls": 0,
+        "visualizations": 0,
+        "total_users": 0,
+        "avg_queries_per_user": 0,
+        "usage_by_day": defaultdict(int),
+        "usage_by_hour": defaultdict(int),
+        "popular_query_types": defaultdict(int)
     }
     
+    users = set()
+    
     try:
-        if os.path.exists(LOG_FILE):
-            with open(LOG_FILE, 'r') as f:
+        if os.path.exists(LOG_PATH):
+            with open(LOG_PATH, "r") as f:
                 for line in f:
                     try:
                         log_entry = json.loads(line.strip())
-                        timestamp = log_entry.get("timestamp", "")
-                        action = log_entry.get("action", "")
-                        user_id = log_entry.get("user_id", "")
                         
-                        if not timestamp or not action:
-                            continue
-                        
-                        # Get just the date part
-                        date = timestamp.split()[0]
-                        
-                        # Count total queries
-                        if action == "query":
-                            usage["total_queries"] += 1
+                        # Get timestamp and convert to datetime
+                        timestamp_str = log_entry.get("timestamp", "")
+                        if timestamp_str:
+                            dt = datetime.datetime.fromisoformat(timestamp_str)
+                            date_str = dt.strftime("%Y-%m-%d")
+                            hour = dt.hour
                             
-                            # Count queries by date
-                            if date not in usage["queries_by_date"]:
-                                usage["queries_by_date"][date] = 0
-                            usage["queries_by_date"][date] += 1
+                            # Update usage by day and hour
+                            metrics["usage_by_day"][date_str] += 1
+                            metrics["usage_by_hour"][hour] += 1
                         
-                        # Count unique users
+                        # Track unique users
+                        user_id = log_entry.get("user_id")
                         if user_id:
-                            usage["total_users"].add(user_id)
-                            
-                            # Count users by date
-                            if date not in usage["users_by_date"]:
-                                usage["users_by_date"][date] = set()
-                            usage["users_by_date"][date].add(user_id)
+                            users.add(user_id)
                         
-                        # Count actions
-                        if action:
-                            if action not in usage["popular_actions"]:
-                                usage["popular_actions"][action] = 0
-                            usage["popular_actions"][action] += 1
+                        # Count by action type
+                        action = log_entry.get("action", "")
+                        if action == "query":
+                            metrics["total_queries"] += 1
+                            
+                            # Track query types
+                            query_text = log_entry.get("details", {}).get("query", "").lower()
+                            for keyword, query_type in [
+                                ("show", "display"),
+                                ("visualize", "visualization"),
+                                ("analyze", "analysis"),
+                                ("calculate", "calculation"),
+                                ("predict", "prediction"),
+                                ("compare", "comparison")
+                            ]:
+                                if keyword in query_text:
+                                    metrics["popular_query_types"][query_type] += 1
+                                    break
+                        elif action == "api_call":
+                            metrics["api_calls"] += 1
+                        elif action == "visualization":
+                            metrics["visualizations"] += 1
                     
-                    except:
+                    except (json.JSONDecodeError, ValueError):
                         continue
+    
     except Exception as e:
-        print(f"Error analyzing logs: {str(e)}")
+        print(f"Error analyzing resource usage: {str(e)}")
     
-    # Convert sets to counts
-    usage["total_users"] = len(usage["total_users"])
-    for date in usage["users_by_date"]:
-        usage["users_by_date"][date] = len(usage["users_by_date"][date])
+    # Finalize metrics
+    metrics["total_users"] = len(users)
+    if metrics["total_users"] > 0:
+        metrics["avg_queries_per_user"] = metrics["total_queries"] / metrics["total_users"]
     
-    return usage
+    # Convert defaultdict to regular dict for serialization
+    metrics["usage_by_day"] = dict(metrics["usage_by_day"])
+    metrics["usage_by_hour"] = dict(metrics["usage_by_hour"])
+    metrics["popular_query_types"] = dict(metrics["popular_query_types"])
+    
+    return metrics
 
 def estimate_costs(user_id=None, start_date=None, end_date=None):
     """
@@ -185,77 +200,99 @@ def estimate_costs(user_id=None, start_date=None, end_date=None):
     Returns:
         dict: Cost estimates
     """
-    # Define cost factors (illustrative)
-    COST_PER_QUERY = 0.02  # $0.02 per query
-    COST_PER_VISUALIZATION = 0.05  # $0.05 per visualization
-    STORAGE_COST_PER_DAY = 0.001  # $0.001 per day for storage
+    # Define cost factors
+    QUERY_COST = 0.0001  # Cost per query in dollars
+    API_CALL_COST = 0.002  # Cost per API call in dollars
+    VISUALIZATION_COST = 0.0005  # Cost per visualization in dollars
     
     costs = {
-        "query_cost": 0,
-        "visualization_cost": 0,
-        "storage_cost": 0,
-        "total_cost": 0,
-        "query_count": 0,
-        "visualization_count": 0,
-        "storage_days": 0
+        "total_cost": 0.0,
+        "query_cost": 0.0,
+        "api_cost": 0.0,
+        "visualization_cost": 0.0,
+        "breakdown_by_day": defaultdict(float),
+        "breakdown_by_user": defaultdict(float) if user_id is None else None
     }
     
     try:
-        if os.path.exists(LOG_FILE):
-            with open(LOG_FILE, 'r') as f:
+        # Parse date filters if provided
+        start_dt = None
+        end_dt = None
+        
+        if start_date:
+            start_dt = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        
+        if end_date:
+            end_dt = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+            # Set to end of day
+            end_dt = end_dt.replace(hour=23, minute=59, second=59)
+        
+        if os.path.exists(LOG_PATH):
+            with open(LOG_PATH, "r") as f:
                 for line in f:
                     try:
                         log_entry = json.loads(line.strip())
                         
-                        # Apply filters
+                        # Filter by user ID if provided
                         if user_id and log_entry.get("user_id") != user_id:
                             continue
                         
-                        timestamp = log_entry.get("timestamp", "")
-                        if not timestamp:
-                            continue
+                        # Filter by date range if provided
+                        if start_dt or end_dt:
+                            timestamp_str = log_entry.get("timestamp", "")
+                            if timestamp_str:
+                                dt = datetime.datetime.fromisoformat(timestamp_str)
+                                
+                                if start_dt and dt < start_dt:
+                                    continue
+                                
+                                if end_dt and dt > end_dt:
+                                    continue
+                                
+                                date_str = dt.strftime("%Y-%m-%d")
+                            else:
+                                continue
+                        else:
+                            # Extract date for breakdown
+                            timestamp_str = log_entry.get("timestamp", "")
+                            if timestamp_str:
+                                dt = datetime.datetime.fromisoformat(timestamp_str)
+                                date_str = dt.strftime("%Y-%m-%d")
+                            else:
+                                date_str = "unknown"
                         
-                        # Parse timestamp
-                        log_date = timestamp.split()[0]  # Get just the date part
+                        # Calculate costs based on action type
+                        action = log_entry.get("action", "")
+                        entry_user_id = log_entry.get("user_id", "unknown")
+                        cost = 0.0
                         
-                        # Apply date filters
-                        if start_date and log_date < start_date:
-                            continue
-                        if end_date and log_date > end_date:
-                            continue
+                        if action == "query":
+                            cost = QUERY_COST
+                            costs["query_cost"] += cost
+                        elif action == "api_call":
+                            cost = API_CALL_COST
+                            costs["api_cost"] += cost
+                        elif action == "visualization":
+                            cost = VISUALIZATION_COST
+                            costs["visualization_cost"] += cost
                         
-                        # Count and cost queries
-                        if log_entry.get("action") == "query":
-                            costs["query_count"] += 1
-                            costs["query_cost"] += COST_PER_QUERY
+                        # Add to total and breakdowns
+                        costs["total_cost"] += cost
+                        costs["breakdown_by_day"][date_str] += cost
                         
-                        # Count and cost visualizations
-                        if log_entry.get("action") == "visualization":
-                            costs["visualization_count"] += 1
-                            costs["visualization_cost"] += COST_PER_VISUALIZATION
+                        if costs["breakdown_by_user"] is not None:
+                            costs["breakdown_by_user"][entry_user_id] += cost
                     
-                    except:
+                    except (json.JSONDecodeError, ValueError):
                         continue
+    
     except Exception as e:
         print(f"Error estimating costs: {str(e)}")
     
-    # Calculate storage costs
-    if start_date and end_date:
-        try:
-            start = datetime.strptime(start_date, "%Y-%m-%d")
-            end = datetime.strptime(end_date, "%Y-%m-%d")
-            days = (end - start).days + 1
-            costs["storage_days"] = days
-            costs["storage_cost"] = days * STORAGE_COST_PER_DAY
-        except:
-            costs["storage_days"] = 30  # Default to 30 days
-            costs["storage_cost"] = 30 * STORAGE_COST_PER_DAY
-    else:
-        costs["storage_days"] = 30  # Default to 30 days
-        costs["storage_cost"] = 30 * STORAGE_COST_PER_DAY
-    
-    # Calculate total cost
-    costs["total_cost"] = costs["query_cost"] + costs["visualization_cost"] + costs["storage_cost"]
+    # Convert defaultdict to regular dict for serialization
+    costs["breakdown_by_day"] = dict(costs["breakdown_by_day"])
+    if costs["breakdown_by_user"] is not None:
+        costs["breakdown_by_user"] = dict(costs["breakdown_by_user"])
     
     return costs
 
@@ -269,46 +306,44 @@ def clear_old_logs(days=30):
     Returns:
         int: Number of logs removed
     """
-    if not os.path.exists(LOG_FILE):
+    if not os.path.exists(LOG_PATH):
         return 0
     
     # Calculate cutoff date
-    cutoff_date = datetime.now() - timedelta(days=days)
-    cutoff_str = cutoff_date.strftime("%Y-%m-%d %H:%M:%S")
+    cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days)
     
     # Read all logs
-    all_logs = []
+    logs = []
     removed_count = 0
     
     try:
-        with open(LOG_FILE, 'r') as f:
+        with open(LOG_PATH, "r") as f:
             for line in f:
                 try:
                     log_entry = json.loads(line.strip())
-                    timestamp = log_entry.get("timestamp", "1970-01-01 00:00:00")
+                    timestamp_str = log_entry.get("timestamp", "")
                     
-                    # Keep logs newer than cutoff date
-                    if timestamp >= cutoff_str:
-                        all_logs.append(log_entry)
+                    if timestamp_str:
+                        dt = datetime.datetime.fromisoformat(timestamp_str)
+                        if dt >= cutoff_date:
+                            logs.append(log_entry)
+                        else:
+                            removed_count += 1
                     else:
-                        removed_count += 1
-                except:
-                    # Keep lines we couldn't parse (shouldn't happen)
-                    all_logs.append(json.loads(line.strip()))
-    except Exception as e:
-        print(f"Error reading logs for cleanup: {str(e)}")
-        return 0
-    
-    # Write back the logs to keep
-    try:
-        with open(LOG_FILE, 'w') as f:
-            for log_entry in all_logs:
+                        logs.append(log_entry)  # Keep entries without timestamp
+                
+                except json.JSONDecodeError:
+                    continue
+        
+        # Write back the filtered logs
+        with open(LOG_PATH, "w") as f:
+            for log_entry in logs:
                 f.write(json.dumps(log_entry) + "\n")
+    
     except Exception as e:
-        print(f"Error writing logs after cleanup: {str(e)}")
-        return 0
+        print(f"Error clearing old logs: {str(e)}")
     
     return removed_count
 
-# Initialize the logger when the module is imported
+# Initialize logger when module is imported
 initialize_logger()

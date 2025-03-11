@@ -8,6 +8,7 @@ import base64
 import plotly.express as px
 import matplotlib.pyplot as plt
 from datetime import datetime
+from PIL import Image
 
 # Import utility modules
 from utils.gemini_helper import query_gemini, extract_visualization_parameters
@@ -17,6 +18,7 @@ from utils.visualization import create_visualization, determine_best_visualizati
 from utils.data_processor import process_query, extract_features
 from utils.admin_logger import log_action
 from utils.database_connector import connect_to_database, list_tables, get_table_schema
+from utils.image_analyzer import analyze_image, extract_data_from_image, analyze_image_data_trends
 
 # Set page config
 st.set_page_config(
@@ -151,8 +153,161 @@ with st.sidebar:
 # Main content area
 st.title("Interactive Data Analysis")
 
-# Chat interface
-chat_container = st.container()
+# Create tabs for different functionality
+tab1, tab2 = st.tabs(["Chat Interface", "Image Analysis"])
+
+with tab2:
+    st.header("Image Analysis")
+    st.write("Upload an image for analysis or extract data from charts and tables.")
+    
+    # Image upload section
+    uploaded_image = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"], key="image_uploader")
+    
+    if uploaded_image:
+        # Display the uploaded image
+        image = Image.open(uploaded_image)
+        st.image(image, caption="Uploaded Image", use_container_width=True)
+        
+        # Save the image temporarily
+        temp_image_path = f"temp_image_{uuid.uuid4()}.jpg"
+        image.save(temp_image_path)
+        
+        # Analysis options
+        analysis_type = st.radio(
+            "Select Analysis Type",
+            ["General Analysis", "Extract Table/Chart Data", "Data Trend Analysis"]
+        )
+        
+        if st.button("Analyze Image"):
+            with st.spinner("Analyzing image..."):
+                try:
+                    if analysis_type == "General Analysis":
+                        # Perform general image analysis
+                        analysis_result = analyze_image(temp_image_path)
+                        st.write("### Analysis Results")
+                        st.write(analysis_result)
+                        
+                        # Log the action
+                        log_action(
+                            st.session_state.user_id,
+                            "image_analysis",
+                            {"analysis_type": "general", "image_name": uploaded_image.name}
+                        )
+                    
+                    elif analysis_type == "Extract Table/Chart Data":
+                        # Extract data from table/chart
+                        extraction_type = st.selectbox(
+                            "What type of data to extract?",
+                            ["table", "chart", "text", "form"]
+                        )
+                        
+                        extracted_data, format_type = extract_data_from_image(temp_image_path, extraction_type)
+                        
+                        st.write("### Extracted Data")
+                        if format_type == "dataframe" and isinstance(extracted_data, pd.DataFrame):
+                            st.dataframe(extracted_data)
+                            
+                            # Option to add the extracted data as a dataset
+                            if st.button("Add as Dataset"):
+                                dataset_name = f"extracted_{extraction_type}_{len(st.session_state.current_data) + 1}"
+                                st.session_state.current_data[dataset_name] = extracted_data
+                                st.success(f"Added extracted data as dataset '{dataset_name}'")
+                        else:
+                            st.write(extracted_data)
+                        
+                        # Log the action
+                        log_action(
+                            st.session_state.user_id,
+                            "image_data_extraction",
+                            {
+                                "extraction_type": extraction_type,
+                                "image_name": uploaded_image.name,
+                                "format": format_type
+                            }
+                        )
+                    
+                    else:  # Data Trend Analysis
+                        # Analyze data trends in the image
+                        trend_analysis = analyze_image_data_trends(temp_image_path)
+                        
+                        st.write("### Data Trend Analysis")
+                        if "error" in trend_analysis:
+                            st.error(trend_analysis["error"])
+                        else:
+                            if "chart_type" in trend_analysis:
+                                st.write(f"**Chart Type:** {trend_analysis['chart_type']}")
+                                st.write(f"**Main Trend:** {trend_analysis['main_trend']}")
+                                
+                                st.write("**Key Points:**")
+                                for point in trend_analysis.get('key_points', []):
+                                    st.write(f"- {point}")
+                                
+                                st.write("**Conclusions:**")
+                                for conclusion in trend_analysis.get('conclusions', []):
+                                    st.write(f"- {conclusion}")
+                            else:
+                                st.write(trend_analysis.get("analysis", "No analysis available"))
+                            
+                            # Display extracted data if available
+                            if "extracted_data" in trend_analysis and trend_analysis["extracted_data"] is not None:
+                                st.write("### Extracted Data")
+                                extracted_df = pd.DataFrame(trend_analysis["extracted_data"])
+                                st.dataframe(extracted_df)
+                                
+                                # Option to add the extracted data as a dataset
+                                if st.button("Add as Dataset"):
+                                    dataset_name = f"trend_data_{len(st.session_state.current_data) + 1}"
+                                    st.session_state.current_data[dataset_name] = extracted_df
+                                    st.success(f"Added trend data as dataset '{dataset_name}'")
+                        
+                        # Log the action
+                        log_action(
+                            st.session_state.user_id,
+                            "image_trend_analysis",
+                            {"image_name": uploaded_image.name}
+                        )
+                
+                except Exception as e:
+                    st.error(f"Error analyzing image: {str(e)}")
+                
+                # Clean up the temporary file
+                try:
+                    if os.path.exists(temp_image_path):
+                        os.remove(temp_image_path)
+                except:
+                    pass
+    else:
+        # Example images
+        st.write("### Try with example images")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("Example 1: ACB Scope"):
+                example_path = "attached_assets/IMG_20250311_215404247.jpg"
+                if os.path.exists(example_path):
+                    image = Image.open(example_path)
+                    st.image(image, caption="ACB Scope Document", use_container_width=True)
+                    
+                    with st.spinner("Analyzing image..."):
+                        analysis_result = analyze_image(example_path)
+                        st.write("### Analysis Results")
+                        st.write(analysis_result)
+        
+        with col2:
+            if st.button("Example 2: ACB Features"):
+                example_path = "attached_assets/IMG_20250311_215415678.jpg"
+                if os.path.exists(example_path):
+                    image = Image.open(example_path)
+                    st.image(image, caption="ACB Features Document", use_container_width=True)
+                    
+                    with st.spinner("Analyzing image..."):
+                        analysis_result = analyze_image(example_path)
+                        st.write("### Analysis Results")
+                        st.write(analysis_result)
+
+# Chat interface in the first tab
+with tab1:
+    chat_container = st.container()
 
 with chat_container:
     # Display chat history

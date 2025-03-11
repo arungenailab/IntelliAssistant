@@ -1,8 +1,10 @@
 import pandas as pd
 import numpy as np
-import base64
 import io
-from io import BytesIO
+import os
+import base64
+import re
+import json
 
 def process_uploaded_file(file_obj):
     """
@@ -14,21 +16,42 @@ def process_uploaded_file(file_obj):
     Returns:
         tuple: (DataFrame, file_type)
     """
-    # Determine file type from extension
-    file_type = file_obj.name.split('.')[-1].lower()
+    # Get file extension
+    file_name = file_obj.name
+    file_extension = os.path.splitext(file_name)[1].lower()
     
-    # Process different file types
-    if file_type == 'csv':
+    # Read file based on extension
+    if file_extension == '.csv':
         df = pd.read_csv(file_obj)
-    elif file_type in ['xls', 'xlsx']:
+        file_type = 'csv'
+    elif file_extension == '.xlsx':
         df = pd.read_excel(file_obj)
-    elif file_type == 'json':
-        df = pd.read_json(file_obj)
+        file_type = 'excel'
+    elif file_extension == '.json':
+        # Try to parse as JSON
+        try:
+            data = json.load(io.StringIO(file_obj.getvalue().decode('utf-8')))
+            
+            # Check if it's a list of records or a single object
+            if isinstance(data, list):
+                df = pd.DataFrame(data)
+            else:
+                # If it's a nested JSON, try to flatten it
+                df = pd.json_normalize(data)
+            
+            file_type = 'json'
+        except Exception as e:
+            raise ValueError(f"Failed to parse JSON file: {str(e)}")
     else:
-        raise ValueError(f"Unsupported file type: {file_type}")
+        raise ValueError(f"Unsupported file format: {file_extension}")
     
-    # Clean the dataframe
-    return clean_dataframe(df), file_type
+    # Clean column names
+    df.columns = [clean_column_name(col) for col in df.columns]
+    
+    # Perform basic cleaning
+    df = clean_dataframe(df)
+    
+    return df, file_type
 
 def clean_column_name(col_name):
     """
@@ -40,17 +63,24 @@ def clean_column_name(col_name):
     Returns:
         str: Cleaned column name
     """
-    # Replace spaces with underscores
-    cleaned = str(col_name).strip().replace(' ', '_').lower()
+    # Convert to string if not already
+    col_name = str(col_name)
     
-    # Remove special characters
-    cleaned = ''.join(c if c.isalnum() or c == '_' else '_' for c in cleaned)
+    # Replace spaces and special characters with underscores
+    col_name = re.sub(r'[^\w\s]', '_', col_name)
+    col_name = re.sub(r'\s+', '_', col_name)
     
-    # Make sure it doesn't start with a number
-    if cleaned and cleaned[0].isdigit():
-        cleaned = 'col_' + cleaned
+    # Remove multiple consecutive underscores
+    col_name = re.sub(r'_+', '_', col_name)
     
-    return cleaned
+    # Remove leading/trailing underscores
+    col_name = col_name.strip('_')
+    
+    # Ensure it's not empty
+    if not col_name:
+        col_name = 'column'
+    
+    return col_name.lower()
 
 def clean_dataframe(df):
     """
@@ -62,29 +92,33 @@ def clean_dataframe(df):
     Returns:
         DataFrame: Cleaned dataframe
     """
-    # Make a copy of the dataframe to avoid modifying the original
-    cleaned_df = df.copy()
+    # Make a copy to avoid modifying the original
+    df_clean = df.copy()
     
-    # Clean column names
-    cleaned_df.columns = [clean_column_name(col) for col in cleaned_df.columns]
+    # Replace empty strings with NaN
+    df_clean = df_clean.replace('', np.nan)
     
-    # Handle missing values for numeric columns
-    numeric_cols = cleaned_df.select_dtypes(include=[np.number]).columns
-    if len(numeric_cols) > 0:
-        # Fill missing numeric values with median
-        for col in numeric_cols:
-            if cleaned_df[col].isna().any():
-                cleaned_df[col] = cleaned_df[col].fillna(cleaned_df[col].median())
+    # Attempt to convert string columns that look numeric to proper numeric types
+    for col in df_clean.select_dtypes(include=['object']).columns:
+        # Skip columns with high percentage of non-numeric values
+        non_numeric_count = sum(pd.to_numeric(df_clean[col], errors='coerce').isna())
+        if non_numeric_count / len(df_clean) < 0.3:  # Less than 30% non-numeric
+            try:
+                df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
+            except:
+                pass
     
-    # Handle missing values for string columns
-    string_cols = cleaned_df.select_dtypes(include=['object']).columns
-    if len(string_cols) > 0:
-        # Fill missing string values with empty string
-        for col in string_cols:
-            if cleaned_df[col].isna().any():
-                cleaned_df[col] = cleaned_df[col].fillna('')
+    # Attempt to convert columns that look like dates to datetime
+    for col in df_clean.select_dtypes(include=['object']).columns:
+        try:
+            # Check if it's a date column by trying to convert a sample
+            sample = df_clean[col].dropna().iloc[0] if not df_clean[col].dropna().empty else ""
+            if isinstance(sample, str) and re.search(r'\d{1,4}[-/]\d{1,2}[-/]\d{1,4}', sample):
+                df_clean[col] = pd.to_datetime(df_clean[col], errors='coerce')
+        except:
+            pass
     
-    return cleaned_df
+    return df_clean
 
 def generate_preview(df, max_rows=5):
     """
@@ -97,37 +131,38 @@ def generate_preview(df, max_rows=5):
     Returns:
         dict: Dataframe preview information
     """
-    # Create a preview with basic info
     preview = {
-        'data': df.head(max_rows).to_dict(orient='records'),
-        'columns': df.columns.tolist(),
-        'dtypes': {col: str(df[col].dtype) for col in df.columns},
-        'shape': df.shape,
-        'missing_values': df.isna().sum().to_dict()
+        "head": df.head(max_rows).to_dict(orient='records'),
+        "shape": df.shape,
+        "columns": list(df.columns),
+        "dtypes": {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)},
+        "missing_values": df.isna().sum().to_dict(),
+        "summary": {}
     }
     
-    # Add numeric column statistics
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    if len(numeric_cols) > 0:
-        preview['numeric_stats'] = {
-            col: {
-                'min': float(df[col].min()),
-                'max': float(df[col].max()),
-                'mean': float(df[col].mean()),
-                'median': float(df[col].median()),
-                'std': float(df[col].std())
-            } for col in numeric_cols
-        }
+    # Generate summary statistics for numeric columns
+    numeric_cols = df.select_dtypes(include=['number']).columns
+    if not numeric_cols.empty:
+        preview["summary"]["numeric"] = df[numeric_cols].describe().to_dict()
     
-    # Add categorical column information
-    cat_cols = df.select_dtypes(include=['object']).columns
-    if len(cat_cols) > 0:
-        preview['categorical_stats'] = {
-            col: {
-                'unique_values': df[col].nunique(),
-                'most_common': df[col].value_counts().head(3).to_dict()
-            } for col in cat_cols
-        }
+    # Generate summary for categorical columns
+    categorical_cols = df.select_dtypes(include=['object', 'category']).columns
+    if not categorical_cols.empty:
+        preview["summary"]["categorical"] = {}
+        for col in categorical_cols:
+            value_counts = df[col].value_counts().head(5).to_dict()
+            if value_counts:
+                preview["summary"]["categorical"][col] = value_counts
+    
+    # Generate summary for datetime columns
+    datetime_cols = df.select_dtypes(include=['datetime']).columns
+    if not datetime_cols.empty:
+        preview["summary"]["datetime"] = {}
+        for col in datetime_cols:
+            preview["summary"]["datetime"][col] = {
+                "min": df[col].min().isoformat() if not pd.isna(df[col].min()) else None,
+                "max": df[col].max().isoformat() if not pd.isna(df[col].max()) else None
+            }
     
     return preview
 
@@ -155,9 +190,9 @@ def dataframe_to_excel(df):
     Returns:
         str: Base64 encoded Excel data
     """
-    output = BytesIO()
+    output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Sheet1')
+        df.to_excel(writer, sheet_name='Sheet1', index=False)
     
     excel_data = output.getvalue()
     b64 = base64.b64encode(excel_data).decode()
@@ -165,7 +200,7 @@ def dataframe_to_excel(df):
 
 def extract_text_from_pdf(file_obj):
     """
-    Extract text from PDF file (placeholder).
+    Extract text from PDF file.
     
     Args:
         file_obj: File object from st.file_uploader
@@ -173,6 +208,18 @@ def extract_text_from_pdf(file_obj):
     Returns:
         str: Extracted text
     """
-    # This is a placeholder function
-    # In a real implementation, you would use a library like PyPDF2 or pdfplumber
-    return "PDF text extraction not implemented"
+    try:
+        import PyPDF2
+        
+        pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_obj.getvalue()))
+        text = ""
+        
+        for page_num in range(len(pdf_reader.pages)):
+            page = pdf_reader.pages[page_num]
+            text += page.extract_text() + "\n\n"
+        
+        return text
+    except ImportError:
+        return "PyPDF2 is not installed. Unable to extract text from PDF."
+    except Exception as e:
+        return f"Error extracting text from PDF: {str(e)}"

@@ -1,15 +1,16 @@
 import os
 import json
 import uuid
-from datetime import datetime
+import datetime
+from typing import List, Dict, Optional, Any
 
-# Directory for storing conversations
-CONVERSATIONS_DIR = os.path.join(os.getcwd(), "data", "conversations")
+# Constants
+CONVERSATION_DIR = "data/conversations"
 
-# Create the directory if it doesn't exist
-os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
+# Create conversation directory if it doesn't exist
+os.makedirs(CONVERSATION_DIR, exist_ok=True)
 
-def save_conversation(user_id, conversation_history):
+def save_conversation(user_id: str, conversation_history: List[Dict[str, Any]]) -> str:
     """
     Save a conversation history for a user.
     
@@ -25,26 +26,21 @@ def save_conversation(user_id, conversation_history):
     
     # Create conversation data structure
     conversation_data = {
-        "conversation_id": conversation_id,
+        "id": conversation_id,
         "user_id": user_id,
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "created_at": datetime.datetime.now().isoformat(),
+        "updated_at": datetime.datetime.now().isoformat(),
         "messages": conversation_history
     }
     
-    # Save to JSON file
-    conversation_file = os.path.join(CONVERSATIONS_DIR, f"{conversation_id}.json")
+    # Save to file
+    file_path = os.path.join(CONVERSATION_DIR, f"{conversation_id}.json")
+    with open(file_path, "w") as f:
+        json.dump(conversation_data, f)
     
-    try:
-        with open(conversation_file, 'w') as f:
-            json.dump(conversation_data, f, indent=2)
-        
-        return conversation_id
-    except Exception as e:
-        print(f"Error saving conversation: {str(e)}")
-        return None
+    return conversation_id
 
-def load_conversation(conversation_id):
+def load_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
     """
     Load a conversation by ID.
     
@@ -54,18 +50,19 @@ def load_conversation(conversation_id):
     Returns:
         dict: Conversation data or None if not found
     """
-    conversation_file = os.path.join(CONVERSATIONS_DIR, f"{conversation_id}.json")
+    file_path = os.path.join(CONVERSATION_DIR, f"{conversation_id}.json")
+    
+    if not os.path.exists(file_path):
+        return None
     
     try:
-        if os.path.exists(conversation_file):
-            with open(conversation_file, 'r') as f:
-                return json.load(f)
-        return None
+        with open(file_path, "r") as f:
+            return json.load(f)
     except Exception as e:
-        print(f"Error loading conversation: {str(e)}")
+        print(f"Error loading conversation {conversation_id}: {str(e)}")
         return None
 
-def load_user_conversations(user_id):
+def load_user_conversations(user_id: str) -> List[Dict[str, Any]]:
     """
     Load all conversations for a user.
     
@@ -75,41 +72,33 @@ def load_user_conversations(user_id):
     Returns:
         list: List of conversation data
     """
-    user_conversations = []
+    conversations = []
     
-    try:
-        # Iterate through all conversation files
-        for filename in os.listdir(CONVERSATIONS_DIR):
-            if filename.endswith('.json'):
-                file_path = os.path.join(CONVERSATIONS_DIR, filename)
-                
-                with open(file_path, 'r') as f:
+    # Check if directory exists
+    if not os.path.exists(CONVERSATION_DIR):
+        return conversations
+    
+    # List all conversation files
+    for filename in os.listdir(CONVERSATION_DIR):
+        if filename.endswith(".json"):
+            file_path = os.path.join(CONVERSATION_DIR, filename)
+            try:
+                with open(file_path, "r") as f:
                     conversation_data = json.load(f)
-                    
-                    # Check if this conversation belongs to the user
                     if conversation_data.get("user_id") == user_id:
-                        # Add a summary of the conversation
-                        if "messages" in conversation_data and len(conversation_data["messages"]) > 0:
-                            first_message = conversation_data["messages"][0]
-                            conversation_data["summary"] = first_message.get("content", "")[:100] + "..."
-                        else:
-                            conversation_data["summary"] = "Empty conversation"
-                        
-                        user_conversations.append(conversation_data)
-        
-        # Sort by updated_at timestamp, newest first
-        user_conversations.sort(
-            key=lambda x: datetime.strptime(x.get("updated_at", "1970-01-01 00:00:00"), "%Y-%m-%d %H:%M:%S"),
-            reverse=True
-        )
-        
-        return user_conversations
+                        conversations.append(conversation_data)
+            except Exception as e:
+                print(f"Error loading conversation {filename}: {str(e)}")
     
-    except Exception as e:
-        print(f"Error loading user conversations: {str(e)}")
-        return []
+    # Sort by updated_at (newest first)
+    conversations.sort(
+        key=lambda x: x.get("updated_at", x.get("created_at", "")), 
+        reverse=True
+    )
+    
+    return conversations
 
-def delete_conversation(conversation_id):
+def delete_conversation(conversation_id: str) -> bool:
     """
     Delete a conversation.
     
@@ -119,18 +108,19 @@ def delete_conversation(conversation_id):
     Returns:
         bool: True if deleted successfully
     """
-    conversation_file = os.path.join(CONVERSATIONS_DIR, f"{conversation_id}.json")
+    file_path = os.path.join(CONVERSATION_DIR, f"{conversation_id}.json")
+    
+    if not os.path.exists(file_path):
+        return False
     
     try:
-        if os.path.exists(conversation_file):
-            os.remove(conversation_file)
-            return True
-        return False
+        os.remove(file_path)
+        return True
     except Exception as e:
-        print(f"Error deleting conversation: {str(e)}")
+        print(f"Error deleting conversation {conversation_id}: {str(e)}")
         return False
 
-def load_conversation_history(conversation_id=None, limit=20):
+def load_conversation_history(conversation_id: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
     """
     Load conversation history for display.
     
@@ -144,17 +134,18 @@ def load_conversation_history(conversation_id=None, limit=20):
     if not conversation_id:
         return []
     
-    conversation = load_conversation(conversation_id)
-    if not conversation or "messages" not in conversation:
+    conversation_data = load_conversation(conversation_id)
+    if not conversation_data or "messages" not in conversation_data:
         return []
     
-    # Return the most recent messages up to the limit
-    messages = conversation["messages"]
-    if len(messages) > limit:
-        return messages[-limit:]
+    # Get the messages, limited to the specified number
+    messages = conversation_data["messages"]
+    if limit > 0:
+        messages = messages[-limit:]
+    
     return messages
 
-def add_message_to_conversation(conversation_id, message):
+def add_message_to_conversation(conversation_id: str, message: Dict[str, Any]) -> bool:
     """
     Add a message to an existing conversation.
     
@@ -165,32 +156,31 @@ def add_message_to_conversation(conversation_id, message):
     Returns:
         bool: True if message was added successfully
     """
-    try:
-        conversation = load_conversation(conversation_id)
-        if not conversation:
-            return False
-        
-        # Add the new message
-        if "messages" not in conversation:
-            conversation["messages"] = []
-        
-        conversation["messages"].append(message)
-        
-        # Update timestamp
-        conversation["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Save the updated conversation
-        conversation_file = os.path.join(CONVERSATIONS_DIR, f"{conversation_id}.json")
-        with open(conversation_file, 'w') as f:
-            json.dump(conversation, f, indent=2)
-        
-        return True
+    # Load existing conversation
+    conversation_data = load_conversation(conversation_id)
+    if not conversation_data:
+        return False
     
+    # Add message to history
+    if "messages" not in conversation_data:
+        conversation_data["messages"] = []
+    
+    conversation_data["messages"].append(message)
+    
+    # Update timestamp
+    conversation_data["updated_at"] = datetime.datetime.now().isoformat()
+    
+    # Save back to file
+    file_path = os.path.join(CONVERSATION_DIR, f"{conversation_id}.json")
+    try:
+        with open(file_path, "w") as f:
+            json.dump(conversation_data, f)
+        return True
     except Exception as e:
-        print(f"Error adding message to conversation: {str(e)}")
+        print(f"Error updating conversation {conversation_id}: {str(e)}")
         return False
 
-def share_conversation(conversation_id, recipient_id):
+def share_conversation(conversation_id: str, recipient_id: str) -> Optional[str]:
     """
     Share a conversation with another user.
     
@@ -201,33 +191,34 @@ def share_conversation(conversation_id, recipient_id):
     Returns:
         str: Shared conversation ID or None if failed
     """
-    try:
-        # Load the original conversation
-        conversation = load_conversation(conversation_id)
-        if not conversation:
-            return None
-        
-        # Create a copy for the recipient
-        shared_conversation = conversation.copy()
-        
-        # Update the metadata
-        shared_conversation["conversation_id"] = str(uuid.uuid4())
-        shared_conversation["original_id"] = conversation_id
-        shared_conversation["user_id"] = recipient_id
-        shared_conversation["shared_from"] = conversation["user_id"]
-        shared_conversation["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        shared_conversation["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        shared_conversation["is_shared"] = True
-        
-        # Save the shared conversation
-        shared_id = shared_conversation["conversation_id"]
-        shared_file = os.path.join(CONVERSATIONS_DIR, f"{shared_id}.json")
-        
-        with open(shared_file, 'w') as f:
-            json.dump(shared_conversation, f, indent=2)
-        
-        return shared_id
+    # Load the original conversation
+    conversation_data = load_conversation(conversation_id)
+    if not conversation_data:
+        return None
     
+    # Create a copy for the recipient
+    shared_conversation = conversation_data.copy()
+    
+    # Generate a new ID for the shared conversation
+    new_conversation_id = str(uuid.uuid4())
+    
+    # Update metadata
+    shared_conversation["id"] = new_conversation_id
+    shared_conversation["user_id"] = recipient_id
+    shared_conversation["shared_from"] = {
+        "user_id": conversation_data.get("user_id"),
+        "conversation_id": conversation_id,
+        "shared_at": datetime.datetime.now().isoformat()
+    }
+    shared_conversation["created_at"] = datetime.datetime.now().isoformat()
+    shared_conversation["updated_at"] = datetime.datetime.now().isoformat()
+    
+    # Save to file
+    file_path = os.path.join(CONVERSATION_DIR, f"{new_conversation_id}.json")
+    try:
+        with open(file_path, "w") as f:
+            json.dump(shared_conversation, f)
+        return new_conversation_id
     except Exception as e:
         print(f"Error sharing conversation: {str(e)}")
         return None
