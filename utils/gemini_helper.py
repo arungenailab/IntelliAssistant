@@ -39,13 +39,41 @@ def query_gemini(user_query, system_prompt=None, model=DEFAULT_MODEL):
             # Create model instance
             model_instance = genai.GenerativeModel(model)
             
+            # Set generation config to improve quality and reduce questioning
+            generation_config = {
+                "temperature": 0.2,  # Lower temperature for more focused responses
+                "top_p": 0.95,       # More deterministic output
+                "top_k": 40,         # More focused token selection
+                "max_output_tokens": 2048,  # Allow for comprehensive answers
+            }
+            
             # Prepare the prompt
             if system_prompt:
+                # Add specific instruction to provide complete answers without questions
+                enhanced_system_prompt = system_prompt.strip() + """
+                
+                IMPORTANT: Provide complete, comprehensive answers that anticipate the user's needs.
+                DO NOT ask follow-up questions in your response. Instead, provide all relevant information
+                in a single, thorough answer.
+                """
+                
                 # Gemini doesn't support system role directly, so we'll prepend it to the user query
-                combined_prompt = f"{system_prompt}\n\nUser query: {user_query}"
-                response = model_instance.generate_content(combined_prompt)
+                combined_prompt = f"{enhanced_system_prompt}\n\nUser query: {user_query}"
+                response = model_instance.generate_content(
+                    combined_prompt,
+                    generation_config=generation_config
+                )
             else:
-                response = model_instance.generate_content(user_query)
+                # Add instruction to the raw query
+                enhanced_query = f"""
+                Please provide a complete answer to the following query without asking follow-up questions:
+                
+                {user_query}
+                """
+                response = model_instance.generate_content(
+                    enhanced_query,
+                    generation_config=generation_config
+                )
             
             # Extract and return the text response
             return response.text

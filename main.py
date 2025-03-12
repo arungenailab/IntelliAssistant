@@ -239,12 +239,20 @@ with tab2:
                                 st.write(f"**Main Trend:** {trend_analysis['main_trend']}")
                                 
                                 st.write("**Key Points:**")
-                                for point in trend_analysis.get('key_points', []):
-                                    st.write(f"- {point}")
+                                key_points = trend_analysis.get('key_points', [])
+                                if key_points and isinstance(key_points, list):
+                                    for point in key_points:
+                                        st.write(f"- {point}")
+                                else:
+                                    st.write("- No key points available")
                                 
                                 st.write("**Conclusions:**")
-                                for conclusion in trend_analysis.get('conclusions', []):
-                                    st.write(f"- {conclusion}")
+                                conclusions = trend_analysis.get('conclusions', [])
+                                if conclusions and isinstance(conclusions, list):
+                                    for conclusion in conclusions:
+                                        st.write(f"- {conclusion}")
+                                else:
+                                    st.write("- No conclusions available")
                             else:
                                 st.write(trend_analysis.get("analysis", "No analysis available"))
                             
@@ -323,22 +331,12 @@ with chat_container:
                     viz = message["visualization"]
                     st.plotly_chart(viz["fig"], use_container_width=True)
                 
-                # Show feedback buttons if not already given
+                # Remove feedback buttons to simplify the interface
                 message_idx = i
-                if message_idx not in st.session_state.feedback:
-                    col1, col2, col3 = st.columns([1, 1, 4])
-                    with col1:
-                        if st.button("👍", key=f"thumbs_up_{message_idx}"):
-                            give_feedback(message_idx, "positive")
-                    with col2:
-                        if st.button("👎", key=f"thumbs_down_{message_idx}"):
-                            give_feedback(message_idx, "negative")
-                else:
+                if message_idx in st.session_state.feedback:
                     st.write(f"Feedback: {st.session_state.feedback[message_idx]}")
 
-# User input
-user_input = st.chat_input("Ask a question about your data or type 'help' for suggestions")
-
+# Define feedback function
 def give_feedback(message_idx, feedback_type):
     """Record user feedback for a specific message."""
     st.session_state.feedback[message_idx] = feedback_type
@@ -425,11 +423,29 @@ def handle_query(user_input):
                 
                 # Parse the response
                 try:
-                    parsed_response = json.loads(response)
+                    # Make sure we have valid JSON
+                    if response and isinstance(response, str):
+                        # Sometimes the response might contain markdown formatting - try to extract just the JSON part
+                        if "```json" in response:
+                            # Extract the json block
+                            json_start = response.find("```json") + 7
+                            json_end = response.find("```", json_start)
+                            if json_end > json_start:
+                                response = response[json_start:json_end].strip()
+                        elif "```" in response:
+                            # Extract any code block
+                            json_start = response.find("```") + 3
+                            json_end = response.find("```", json_start)
+                            if json_end > json_start:
+                                response = response[json_start:json_end].strip()
+                        
+                        parsed_response = json.loads(response)
+                    else:
+                        raise ValueError("Invalid response format from AI")
                     
                     # Execute the generated query
                     sql_query = parsed_response.get("query", "")
-                    if sql_query:
+                    if sql_query and isinstance(sql_query, str):
                         result, dataframes_used = process_query(
                             sql_query, 
                             st.session_state.current_data,
@@ -467,7 +483,7 @@ def handle_query(user_input):
         You are an Analytical Chat Bot, an AI assistant specialized in data analysis and visualization.
         
         If the user's query is about data analysis, statistics, or visualization, provide a detailed 
-        and helpful response. If the query is unclear, ask clarifying questions.
+        and helpful response. Provide complete answers that anticipate user needs without asking follow-up questions.
         
         Format your responses using markdown for better readability.
         """
@@ -539,6 +555,9 @@ def handle_query(user_input):
             "error",
             {"error": str(e), "query": user_input}
         )
+
+# User input
+user_input = st.chat_input("Ask a question about your data or type 'help' for suggestions")
 
 # Process user input when provided
 if user_input:
