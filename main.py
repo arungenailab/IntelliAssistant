@@ -383,152 +383,137 @@ def handle_query(user_input):
         {"query": user_input}
     )
     
+    # Get conversation context
+    conversation_context = ""
+    if len(st.session_state.chat_history) > 1:
+        # Get last 5 messages for context
+        context_messages = st.session_state.chat_history[-6:-1]
+        conversation_context = "\n\nPrevious conversation:\n"
+        for msg in context_messages:
+            role = "User" if msg["role"] == "user" else "Assistant"
+            content = msg["content"]
+            conversation_context += f"{role}: {content}\n"
+    
     try:
         # Check if this is a data query
         data_query = False
         processing_result = None
-        datasets_to_process = {}
         
-        for keyword in ["show", "plot", "visualize", "analyze", "query", "select", "calculate", "compute"]:
-            if keyword in user_input.lower():
+        # Keywords that indicate a data query
+        data_keywords = [
+            "show", "plot", "visualize", "analyze", "query", "select", 
+            "calculate", "compute", "compare", "trend", "distribution",
+            "correlation", "graph", "chart"
+        ]
+        
+        for keyword in data_keywords:
+            if keyword.lower() in user_input.lower():
                 data_query = True
                 break
         
         if data_query and st.session_state.current_data:
-            # Try to process as a data query
             try:
-                system_prompt = """
-                You are an expert data analyst. Based on the user's query, generate a SQL-like query 
-                to extract the relevant information from the available datasets. 
+                # Create system prompt with available data and conversation context
+                system_prompt = get_data_analysis_prompt()
                 
-                Available datasets:
-                """
+                # Add dataset information
+                system_prompt += "\n\nAvailable datasets:"
                 for name, df in st.session_state.current_data.items():
-                    system_prompt += f"\n- {name}: {list(df.columns)}"
+                    system_prompt += f"\n- {name}:"
+                    system_prompt += f"\n  Columns: {list(df.columns)}"
+                    system_prompt += f"\n  Types: {df.dtypes.to_dict()}"
+                    system_prompt += f"\n  Sample: {df.head(2).to_dict()}"
                 
-                system_prompt += """
-                Return your response in this format:
-                {
-                    "query": "The SQL-like query to execute",
-                    "visualization": "The type of visualization to create (bar, line, scatter, pie, etc.)",
-                    "explanation": "Brief explanation of the analysis"
-                }
-                """
+                # Add conversation context
+                system_prompt += f"\n\n{conversation_context}"
                 
-                # Extract SQL-like query using AI
+                # Debug logging
+                st.write("Debug: Processing data query")
+                
+                # Get response from AI
                 response = query_gemini(
                     user_query=user_input,
                     system_prompt=system_prompt
                 )
                 
-                # Parse the response
-                try:
-                    # Make sure we have valid JSON
-                    if response and isinstance(response, str):
-                        # Sometimes the response might contain markdown formatting - try to extract just the JSON part
-                        if "```json" in response:
-                            # Extract the json block
-                            json_start = response.find("```json") + 7
-                            json_end = response.find("```", json_start)
-                            if json_end > json_start:
-                                response = response[json_start:json_end].strip()
-                        elif "```" in response:
-                            # Extract any code block
-                            json_start = response.find("```") + 3
-                            json_end = response.find("```", json_start)
-                            if json_end > json_start:
-                                response = response[json_start:json_end].strip()
-                        
-                        parsed_response = json.loads(response)
-                    else:
-                        raise ValueError("Invalid response format from AI")
-                    
-                    # Execute the generated query
-                    sql_query = parsed_response.get("query", "")
-                    if sql_query and isinstance(sql_query, str):
-                        result, dataframes_used = process_query(
-                            sql_query, 
-                            st.session_state.current_data,
-                            st.session_state.db_connection
-                        )
-                        
-                        if not result.empty:
-                            # Determine visualization type
-                            vis_type = parsed_response.get("visualization", "")
-                            if not vis_type:
-                                vis_type = determine_best_visualization(result)
-                            
-                            # Create visualization
-                            visualization = create_visualization(
-                                result, 
-                                vis_type, 
-                                user_input
-                            )
-                            
-                            # Prepare response
-                            processing_result = {
-                                "result": result,
-                                "visualization": visualization,
-                                "explanation": parsed_response.get("explanation", "")
-                            }
+                # Debug logging
+                st.write("Debug: AI Response")
+                st.write(response)
                 
-                except Exception as e:
-                    st.error(f"Error parsing AI response: {str(e)}")
-            
+                # Process the response and create visualization
+                if response:
+                    try:
+                        # Parse the response
+                        parsed_response = parse_ai_response(response)
+                        
+                        # Debug logging
+                        if parsed_response:
+                            st.write("Debug: Parsed response keys")
+                            st.write(list(parsed_response.keys()))
+                        
+                        if parsed_response:
+                            # Execute the query
+                            result = execute_query(parsed_response, st.session_state.current_data)
+                            
+                            if result is not None and not result.empty:
+                                # Display the result
+                                st.write("### Query Result")
+                                st.dataframe(result.head(10))
+                                
+                                # Create and display visualization
+                                vis_type = parsed_response.get("visualization_type", "")
+                                vis_params = parsed_response.get("visualization_params", {})
+                                
+                                visualization = create_and_display_visualization(
+                                    result,
+                                    vis_type,
+                                    user_input,
+                                    vis_params
+                                )
+                                
+                                # Prepare response
+                                processing_result = {
+                                    "result": result,
+                                    "visualization": visualization,
+                                    "explanation": parsed_response.get("explanation", "")
+                                }
+                    
+                    except Exception as e:
+                        st.error(f"Error processing AI response: {str(e)}")
+                
             except Exception as e:
                 st.error(f"Error processing data query: {str(e)}")
         
-        # Generate AI response
-        system_prompt = """
-        You are an Analytical Chat Bot, an AI assistant specialized in data analysis and visualization.
-        
-        If the user's query is about data analysis, statistics, or visualization, provide a detailed 
-        and helpful response. Provide complete answers that anticipate user needs without asking follow-up questions.
-        
-        Format your responses using markdown for better readability.
-        """
-        
-        if st.session_state.current_data:
-            system_prompt += "\n\nAvailable datasets:"
-            for name, df in st.session_state.current_data.items():
-                system_prompt += f"\n- {name}: {list(df.columns)}"
-        
+        # Generate final response
         if processing_result:
-            system_prompt += f"""
-            \n\nI've already analyzed the data based on the user's query. Here's the result:
+            assistant_message = {
+                "role": "assistant",
+                "content": processing_result["explanation"]
+            }
             
-            Result shape: {processing_result['result'].shape}
-            
-            Explanation: {processing_result['explanation']}
-            
-            Please enhance this explanation with more insights, but keep your response concise and focused on the data.
-            """
-        
-        # Get response from AI
-        response = query_gemini(
-            user_query=user_input,
-            system_prompt=system_prompt
-        )
-        
-        # Create assistant message
-        assistant_message = {
-            "role": "assistant",
-            "content": response
-        }
-        
-        # Add visualization if available
-        if processing_result and processing_result["visualization"]:
-            assistant_message["visualization"] = processing_result["visualization"]
-            
-            # Log the visualization
-            log_action(
-                st.session_state.user_id,
-                "visualization",
-                {
-                    "type": processing_result["visualization"]["type"],
-                    "query": user_input
-                }
+            if "visualization" in processing_result and processing_result["visualization"]:
+                assistant_message["visualization"] = processing_result["visualization"]
+                
+                # Log the visualization
+                log_action(
+                    st.session_state.user_id,
+                    "visualization",
+                    {
+                        "type": processing_result["visualization"]["type"],
+                        "query": user_input
+                    }
+                )
+        else:
+            # Handle non-data queries or failed data queries
+            response = query_gemini(
+                user_query=user_input,
+                system_prompt=get_general_system_prompt() + conversation_context
             )
+            
+            assistant_message = {
+                "role": "assistant",
+                "content": response
+            }
         
         # Add to chat history
         st.session_state.chat_history.append(assistant_message)
@@ -540,21 +525,244 @@ def handle_query(user_input):
         )
     
     except Exception as e:
-        error_message = f"I encountered an error while processing your request: {str(e)}"
-        st.session_state.chat_history.append({"role": "assistant", "content": error_message})
+        handle_error(e, user_input)
+
+def parse_ai_response(response):
+    """Parse and validate the AI response."""
+    try:
+        # Debug logging
+        st.write("Debug: Parsing AI response")
         
-        # Save to conversation
+        # Extract JSON from response
+        if isinstance(response, str):
+            # Handle markdown code blocks
+            if "```json" in response:
+                json_start = response.find("```json") + 7
+                json_end = response.find("```", json_start)
+                if json_end > json_start:
+                    response = response[json_start:json_end].strip()
+                    st.write("Debug: Extracted JSON from code block")
+            elif "```" in response:
+                json_start = response.find("```") + 3
+                json_end = response.find("```", json_start)
+                if json_end > json_start:
+                    response = response[json_start:json_end].strip()
+                    st.write("Debug: Extracted code block")
+            
+            # Try to find JSON object in the response
+            json_pattern = r'\{(?:[^{}]|(?R))*\}'
+            import re
+            json_matches = re.findall(json_pattern, response)
+            if json_matches:
+                response = json_matches[0]
+                st.write("Debug: Extracted JSON using regex")
+        
+        # Parse JSON
+        try:
+            parsed = json.loads(response)
+            st.write("Debug: Successfully parsed JSON")
+        except json.JSONDecodeError:
+            # Try to clean the response
+            cleaned_response = response.replace("'", '"')  # Replace single quotes with double quotes
+            cleaned_response = re.sub(r'//.*?(\n|$)', '', cleaned_response)  # Remove comments
+            parsed = json.loads(cleaned_response)
+            st.write("Debug: Parsed JSON after cleaning")
+        
+        # Validate required fields
+        required_fields = ["query", "visualization_type", "explanation"]
+        missing_fields = [field for field in required_fields if field not in parsed]
+        
+        if missing_fields:
+            st.warning(f"Warning: Missing required fields in AI response: {missing_fields}")
+            
+            # Try to fix missing fields with defaults
+            if "query" not in parsed and "pandas_operation" in parsed:
+                parsed["query"] = parsed["pandas_operation"]
+            
+            if "visualization_type" not in parsed and "visualization" in parsed:
+                parsed["visualization_type"] = parsed["visualization"]
+            
+            # Check again after fixes
+            missing_fields = [field for field in required_fields if field not in parsed]
+            if missing_fields:
+                st.error(f"Error: Still missing required fields: {missing_fields}")
+                return None
+        
+        # Validate visualization parameters
+        if "visualization_params" not in parsed:
+            st.write("Debug: No visualization_params found, creating default")
+            parsed["visualization_params"] = {}
+        
+        return parsed
+    
+    except Exception as e:
+        st.error(f"Error parsing AI response: {str(e)}")
+        st.write("Debug: Failed to parse response")
+        st.write(response)
+        return None
+
+def execute_query(parsed_response, current_data):
+    """Execute the query and return results."""
+    try:
+        # Debug logging
+        st.write("Debug: Executing query")
+        
+        query = parsed_response.get("query", "")
+        if not query or not isinstance(query, str):
+            st.error("Invalid query in AI response")
+            return None
+        
+        st.write(f"Debug: Query to execute: {query}")
+        
+        # Check if this is a pandas operation or SQL-like query
+        if "SELECT" in query.upper() or "FROM" in query.upper():
+            # Process as SQL-like query
+            st.write("Debug: Processing as SQL-like query")
+            result, _ = process_query(query, current_data, st.session_state.db_connection)
+        else:
+            # Process as pandas operation
+            st.write("Debug: Processing as pandas operation")
+            
+            # Create a safe environment for execution
+            local_vars = {'pd': pd, 'np': np}
+            
+            # Add dataframes to local variables
+            for name, df in current_data.items():
+                local_vars[name] = df
+            
+            # Execute the pandas operation
+            try:
+                # Replace common aggregation patterns
+                if "groupby" in query and any(agg in query for agg in ["sum(", "mean(", "count("]):
+                    # Convert SQL-like aggregation to pandas
+                    query = query.replace("sum(", "sum()[")
+                    query = query.replace("mean(", "mean()[")
+                    query = query.replace("count(", "count()[")
+                    query = query.replace(")", "]")
+                
+                # Execute the query
+                result = eval(query, {"__builtins__": {}}, local_vars)
+                
+                # Convert to DataFrame if result is a Series
+                if isinstance(result, pd.Series):
+                    result = result.reset_index()
+                
+                # Ensure we have a DataFrame
+                if not isinstance(result, pd.DataFrame):
+                    st.error(f"Query result is not a DataFrame: {type(result)}")
+                    return None
+                
+            except Exception as e:
+                st.error(f"Error executing pandas operation: {str(e)}")
+                
+                # Try to execute as a SQL-like query as fallback
+                st.write("Debug: Falling back to SQL-like query")
+                try:
+                    result, _ = process_query(query, current_data, st.session_state.db_connection)
+                except Exception as e2:
+                    st.error(f"Fallback also failed: {str(e2)}")
+                    return None
+        
+        # Debug logging
+        if result is not None:
+            st.write(f"Debug: Query result shape: {result.shape}")
+        
+        return result
+    except Exception as e:
+        st.error(f"Error executing query: {str(e)}")
+        return None
+
+def get_general_system_prompt():
+    """Get the general system prompt for non-data queries."""
+    return """You are an Analytical Chat Bot, an AI assistant specialized in data analysis and visualization.
+    Provide complete answers that anticipate user needs without asking follow-up questions.
+    Format your responses using markdown for better readability."""
+
+def handle_error(e, user_input):
+    """Handle errors in a consistent way."""
+    error_message = f"I encountered an error while processing your request: {str(e)}"
+    st.session_state.chat_history.append({"role": "assistant", "content": error_message})
+    
+    # Save to conversation if available
+    if st.session_state.conversation_id:
         add_message_to_conversation(
             st.session_state.conversation_id,
             {"role": "assistant", "content": error_message}
         )
+    
+    # Log the error
+    log_action(
+        st.session_state.user_id,
+        "error",
+        {"error": str(e), "query": user_input}
+    )
+    
+    # Display the error in the UI
+    st.error(f"Error: {str(e)}")
+
+def create_and_display_visualization(result_df, vis_type, user_query, vis_params=None):
+    """Create and display a visualization with proper error handling."""
+    try:
+        # Debug logging
+        st.write(f"Debug: Creating visualization of type '{vis_type}'")
+        st.write(f"Debug: Data shape: {result_df.shape}")
         
-        # Log the error
-        log_action(
-            st.session_state.user_id,
-            "error",
-            {"error": str(e), "query": user_input}
+        # Create the visualization
+        visualization = create_visualization(
+            result_df,
+            vis_type,
+            user_query,
+            vis_params
         )
+        
+        # Debug: Check if visualization was created
+        if visualization and "fig" in visualization:
+            st.write("Debug: Visualization created successfully")
+            
+            # Display the visualization
+            st.plotly_chart(visualization["fig"], use_container_width=True)
+            return visualization
+        else:
+            st.warning("Failed to create visualization. Please try a different query.")
+            return None
+            
+    except Exception as e:
+        st.error(f"Error creating visualization: {str(e)}")
+        return None
+
+def get_data_analysis_prompt():
+    """Get the system prompt for data analysis queries."""
+    return """You are an expert data analyst. Based on the user's query and conversation context,
+    generate appropriate pandas operations to analyze the data and create visualizations.
+    
+    APPROACH:
+    1. INTERNALLY analyze the query and context
+    2. Generate pandas-compatible operations
+    3. Choose appropriate visualization
+    4. Return complete configuration
+    
+    Your response MUST be a valid JSON object with the following structure:
+    {
+        "query": "The pandas operation to execute (e.g., df.groupby('column').sum())",
+        "visualization_type": "bar|line|scatter|pie|histogram|box",
+        "explanation": "A detailed explanation of the analysis and insights",
+        "visualization_params": {
+            "x": "column_name_for_x_axis",
+            "y": "column_name_for_y_axis",
+            "title": "Clear and descriptive title",
+            "color": "column_name_for_color_grouping",  // Optional
+            "orientation": "horizontal|vertical",  // Optional
+            "aggregation": "sum|mean|count"  // Optional
+        }
+    }
+    
+    IMPORTANT:
+    1. Return ONLY a valid JSON object
+    2. DO NOT include any explanatory text or code snippets outside the JSON
+    3. DO NOT use markdown code blocks
+    4. Ensure all column names exactly match the available columns
+    5. Include all required parameters for the chosen visualization type
+    """
 
 # User input
 user_input = st.chat_input("Ask a question about your data or type 'help' for suggestions")

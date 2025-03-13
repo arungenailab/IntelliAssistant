@@ -1,0 +1,22 @@
+sales_person,country,product,date,amount,boxes_shipped
+Alice,USA,Chocolate A,2023-01-01,1000,10
+Bob,Canada,Chocolate B,2023-01-02,1200,12
+Charlie,UK,Chocolate C,2023-01-03,1500,15
+Alice,USA,Chocolate B,2023-01-04,1100,11
+Bob,Canada,Chocolate A,2023-01-05,1300,13
+Charlie,UK,Chocolate C,2023-01-06,1600,16
+Alice,USA,Chocolate C,2023-01-07,1400,14
+Bob,Canada,Chocolate A,2023-01-08,1700,17
+Charlie,UK,Chocolate B,2023-01-09,1800,18
+Alice,USA,Chocolate A,2023-01-10,1900,19
+Bob,Canada,Chocolate B,2023-01-11,2000,20
+Charlie,UK,Chocolate C,2023-01-12,2100,21
+Alice,USA,Chocolate B,2023-01-13,2200,22
+Bob,Canada,Chocolate A,2023-01-14,2300,23
+Charlie,UK,Chocolate C,2023-01-15,2400,24
+Alice,USA,Chocolate C,2023-01-16,2500,25
+Bob,Canada,Chocolate A,2023-01-17,2600,26
+Charlie,UK,Chocolate B,2023-01-18,2700,27
+Alice,USA,Chocolate A,2023-01-19,2800,28
+Bob,Canada,Chocolate B,2023-01-20,2900,29
+Charlie,UK,Chocolate C,2023-01-21,3000,30

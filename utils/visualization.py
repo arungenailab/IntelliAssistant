@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 from typing import Dict, List, Any, Optional, Union
 
-def create_visualization(data, vis_type, query_text, custom_title=None):
+def create_visualization(data, vis_type, query_text, visualization_params=None):
     """
     Create a visualization based on the data and type.
     
@@ -13,18 +13,46 @@ def create_visualization(data, vis_type, query_text, custom_title=None):
         data (DataFrame): The data to visualize
         vis_type (str): Type of visualization
         query_text (str): Text of the original query for context
-        custom_title (str, optional): Custom title for the visualization
+        visualization_params (dict, optional): Parameters for the visualization
         
     Returns:
         dict: Visualization result containing the figure and metadata
     """
+    # Debug logging for input validation
+    print(f"Debug: Creating visualization with parameters:")
+    print(f"Debug: Data shape: {data.shape}")
+    print(f"Debug: Visualization type: {vis_type}")
+    print(f"Debug: Query text: {query_text}")
+    print(f"Debug: Visualization parameters: {visualization_params}")
+    
+    # Validate visualization parameters
+    if visualization_params:
+        required_params = {
+            'bar': ['x', 'y'],
+            'line': ['x', 'y'],
+            'scatter': ['x', 'y'],
+            'pie': ['names', 'values'],
+            'histogram': ['x'],
+            'box': ['y']
+        }
+        
+        vis_type_lower = vis_type.lower()
+        if vis_type_lower in required_params:
+            missing_params = [param for param in required_params[vis_type_lower] 
+                            if param not in visualization_params]
+            if missing_params:
+                print(f"Warning: Missing required parameters for {vis_type}: {missing_params}")
+                # Fall back to automatic parameter selection
+                visualization_params = None
+    
     # Determine visualization type if not specified
     if not vis_type or vis_type.lower() == 'auto':
         vis_type = determine_best_visualization(data)
     
     # Generate a title based on the query if not provided
-    if not custom_title:
-        custom_title = generate_title_from_query(query_text, vis_type)
+    if not visualization_params:
+        visualization_params = {}
+    custom_title = visualization_params.get('title', generate_title_from_query(query_text, vis_type))
     
     # Create the visualization
     if vis_type.lower() in ['bar', 'barplot', 'bar chart']:
@@ -101,7 +129,7 @@ def create_dashboard(data_dict, queries=None):
         query = queries.get(name, f"Analysis of {name}") if queries else f"Analysis of {name}"
         
         # Create visualization
-        visualization = create_visualization(df, vis_type, query, custom_title=name)
+        visualization = create_visualization(df, vis_type, query)
         
         # Add to dashboard
         dashboard["visualizations"].append({

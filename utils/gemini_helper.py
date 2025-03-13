@@ -3,6 +3,7 @@ import time
 import google.generativeai as genai
 import json
 import re
+import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 
 # Set API key from environment
@@ -18,7 +19,100 @@ for model in genai.list_models():
     if "gemini" in model.name:
         print(f"- {model.name}")
 
-def query_gemini(user_query, system_prompt=None, model=DEFAULT_MODEL):
+def analyze_data(user_query: str, data: pd.DataFrame, conversation_history: Optional[List] = None) -> Dict[str, Any]:
+    """
+    Analyze data based on user query and return insights with visualization suggestions
+    
+    Args:
+        user_query (str): User's question or request
+        data (pd.DataFrame): Data to analyze
+        conversation_history (List, optional): Previous conversation messages
+        
+    Returns:
+        Dict with text response and visualization config
+    """
+    try:
+        # Create system prompt with data context
+        system_prompt = "You are an expert data analyst. Analyze the data and provide insights based on the user's query.\n\n"
+        
+        # Add formatting instructions
+        system_prompt += "FORMAT YOUR RESPONSES WITH PROPER STRUCTURE:\n"
+        system_prompt += "- Use paragraph breaks between different points or sections\n"
+        system_prompt += "- Use bullet points or numbered lists for multiple items\n"
+        system_prompt += "- Include proper spacing and indentation for readability\n"
+        system_prompt += "- Format numbers and statistics clearly\n\n"
+        
+        # Add data context
+        system_prompt += f"Data shape: {data.shape[0]} rows, {data.shape[1]} columns\n"
+        system_prompt += f"Columns: {', '.join(data.columns)}\n\n"
+        
+        # Add sample data
+        system_prompt += "Sample data (first 3 rows):\n"
+        system_prompt += data.head(3).to_string()
+        system_prompt += "\n\nSummary statistics:\n"
+        system_prompt += data.describe().to_string()
+        
+        # Add conversation history if available
+        if conversation_history:
+            system_prompt += "\n\nPrevious conversation:\n"
+            for msg in conversation_history[-3:]:  # Last 3 messages
+                role = msg.get('role', 'user')
+                content = msg.get('content', '')
+                system_prompt += f"{role}: {content}\n"
+        
+        # Query Gemini
+        response = query_gemini(
+            user_query=user_query,
+            system_prompt=system_prompt,
+            model=DEFAULT_MODEL
+        )
+        
+        # Ensure response has proper formatting
+        response = ensure_proper_formatting(response)
+        
+        # Determine if visualization would be helpful
+        viz_config = None
+        viz_keywords = ['trend', 'compare', 'distribution', 'relationship', 'show', 'plot', 'graph', 'chart', 'visualize']
+        
+        if any(keyword in user_query.lower() for keyword in viz_keywords):
+            # Get visualization parameters
+            viz_config = extract_visualization_parameters(data, response, user_query)
+        
+        return {
+            'text': response,
+            'visualization': viz_config
+        }
+        
+    except Exception as e:
+        print(f"Error analyzing data: {str(e)}")
+        return {
+            'text': f"I encountered an error analyzing the data: {str(e)}",
+            'visualization': None
+        }
+
+def ensure_proper_formatting(text: str) -> str:
+    """
+    Ensure the response text has proper formatting with line breaks and spacing.
+    
+    Args:
+        text (str): The response text from the model
+        
+    Returns:
+        str: Properly formatted text
+    """
+    # Replace single newlines with double newlines for paragraph breaks
+    text = re.sub(r'(?<!\n)\n(?!\n)', '\n\n', text)
+    
+    # Ensure bullet points and numbered lists have proper spacing
+    text = re.sub(r'(\n[*\-•])', '\n\n$1', text)
+    text = re.sub(r'(\n\d+\.)', '\n\n$1', text)
+    
+    # Remove excessive newlines (more than 2)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text
+
+def query_gemini(user_query: str, system_prompt: Optional[str] = None, model: str = DEFAULT_MODEL) -> str:
     """
     Query Gemini with user input and an optional system prompt.
     
@@ -39,7 +133,7 @@ def query_gemini(user_query, system_prompt=None, model=DEFAULT_MODEL):
             # Create model instance
             model_instance = genai.GenerativeModel(model)
             
-            # Set generation config to improve quality and reduce questioning
+            # Set generation config
             generation_config = {
                 "temperature": 0.2,  # Lower temperature for more focused responses
                 "top_p": 0.95,       # More deterministic output
@@ -49,7 +143,7 @@ def query_gemini(user_query, system_prompt=None, model=DEFAULT_MODEL):
             
             # Prepare the prompt
             if system_prompt:
-                # Add specific instruction to provide complete answers without questions
+                # Add specific instruction to provide complete answers
                 enhanced_system_prompt = system_prompt.strip() + """
                 
                 IMPORTANT: Provide complete, comprehensive answers that anticipate the user's needs.
@@ -57,7 +151,7 @@ def query_gemini(user_query, system_prompt=None, model=DEFAULT_MODEL):
                 in a single, thorough answer.
                 """
                 
-                # Gemini doesn't support system role directly, so we'll prepend it to the user query
+                # Combine prompts
                 combined_prompt = f"{enhanced_system_prompt}\n\nUser query: {user_query}"
                 response = model_instance.generate_content(
                     combined_prompt,
@@ -75,8 +169,8 @@ def query_gemini(user_query, system_prompt=None, model=DEFAULT_MODEL):
                     generation_config=generation_config
                 )
             
-            # Extract and return the text response
-            return response.text
+            # Return the text response
+            return response.text.strip()
         
         except Exception as e:
             retry_count += 1
@@ -88,51 +182,7 @@ def query_gemini(user_query, system_prompt=None, model=DEFAULT_MODEL):
             print(f"Error querying Gemini: {str(e)}. Retrying in {wait_time} seconds...")
             time.sleep(wait_time)
 
-def generate_sql_query(user_query, available_sources, dataframes_info=None):
-    """
-    Generate a SQL-like query from a natural language query.
-    
-    Args:
-        user_query (str): The user's natural language query
-        available_sources (list): Available data sources
-        dataframes_info (dict, optional): Information about available dataframes
-        
-    Returns:
-        str: The generated SQL-like query
-    """
-    # Create a system prompt
-    system_prompt = f"""
-    You are an expert SQL query generator.
-    
-    The user is trying to query their data using natural language.
-    Convert the natural language query into a SQL query that can be executed.
-    
-    Available data sources: {', '.join(available_sources)}
-    """
-    
-    if dataframes_info:
-        system_prompt += "\n\nInformation about available data sources:\n"
-        for df_name, info in dataframes_info.items():
-            system_prompt += f"\n{df_name}:\n"
-            system_prompt += f"- Columns: {', '.join(info.get('columns', []))}\n"
-            system_prompt += f"- Types: {info.get('types', {})}\n"
-    
-    system_prompt += """
-    Return ONLY the SQL query without any explanation or additional text.
-    Don't use backticks or other markdown formatting.
-    """
-    
-    try:
-        response = query_gemini(
-            user_query=user_query,
-            system_prompt=system_prompt,
-            model=DEFAULT_MODEL
-        )
-        return response
-    except Exception as e:
-        raise Exception(f"Failed to generate SQL query: {str(e)}")
-
-def suggest_query_improvements(user_query, data_context):
+def suggest_query_improvements(user_query: str, data_context: Dict) -> Dict[str, Any]:
     """
     Suggest improvements to user's query based on available data.
     
@@ -163,73 +213,100 @@ def suggest_query_improvements(user_query, data_context):
             model=DEFAULT_MODEL
         )
         
-        # Attempt to parse the response as JSON
+        # Parse response as JSON
         try:
             return json.loads(response)
         except json.JSONDecodeError:
-            # Extract JSON from the response if it's not properly formatted
+            # Extract JSON if not properly formatted
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group(0))
             else:
-                # If JSON extraction fails, create a structured response
                 return {
                     "improved_query": user_query,
                     "clarifying_questions": ["Could you provide more details about what you're looking for?"],
                     "explanation": "I processed your query but couldn't format the response properly."
                 }
     except Exception as e:
-        # If there's an error, return a default response
         return {
             "improved_query": user_query,
             "clarifying_questions": ["Could you provide more details about what you're looking for?"],
             "explanation": f"I encountered an issue analyzing your query: {str(e)}"
         }
 
-def extract_visualization_parameters(user_query, data_sample):
-    """
-    Extract visualization parameters from a user query.
-    
-    Args:
-        user_query (str): The user's query
-        data_sample (dict): Sample of the data to be visualized
-        
-    Returns:
-        dict: Visualization parameters (type, x_axis, y_axis, etc.)
-    """
-    system_prompt = f"""
-    You are a data visualization expert. Given a user query and a sample of data,
-    determine the best visualization type and parameters.
-    
-    Data sample: {json.dumps(data_sample)}
-    
-    Return your response in JSON format with these fields:
-    1. visualization_type (str): The recommended visualization type (bar, line, scatter, pie, etc.)
-    2. x_axis (str): The column to use for the x-axis
-    3. y_axis (str or list): The column(s) to use for the y-axis
-    4. title (str): A suggested title for the visualization
-    5. color_by (str, optional): Column to use for color differentiation
-    6. facet_by (str, optional): Column to use for faceting/small multiples
-    """
-    
+def extract_visualization_parameters(data, query_result, user_query):
+    """Extract visualization parameters from the Gemini model response."""
+    system_prompt = """You are a data visualization expert. Based on the data and query results provided,
+determine the most effective visualization parameters to represent the insights.
+
+APPROACH:
+1. INTERNALLY analyze the data structure and values
+2. Consider the user's question and what insights they're seeking
+3. Choose the most appropriate visualization type
+4. Determine the optimal configuration parameters
+
+IMPORTANT:
+1. Return ONLY a valid JSON configuration object
+2. DO NOT include any explanatory text or code snippets
+3. DO NOT use markdown code blocks
+4. Ensure all parameters match the data columns exactly
+5. Include all required parameters for the chosen visualization type
+
+The configuration MUST follow this exact format:
+{
+    "type": "bar|line|scatter|pie|histogram|box",
+    "x": "exact_column_name_for_x_axis",
+    "y": "exact_column_name_for_y_axis",
+    "title": "Clear and descriptive title",
+    "color": "column_name_for_color_grouping",  // Optional
+    "orientation": "horizontal|vertical",  // Optional
+    "aggregation": "sum|mean|count",  // Optional
+    "additional_params": {}  // Optional
+}
+"""
+
+    user_message = f"""
+Data structure: {data.dtypes.to_dict()}
+Sample data: {data.head(3).to_dict()}
+Query result: {query_result}
+Available columns: {list(data.columns)}
+User question: {user_query}
+
+Based on this information, provide the visualization configuration that will best represent the insights.
+"""
+
     try:
-        response = query_gemini(
-            user_query=user_query,
-            system_prompt=system_prompt,
-            model=DEFAULT_MODEL
-        )
+        model = genai.GenerativeModel('gemini-1.0-pro')
+        response = model.generate_content([
+            {'role': 'system', 'parts': [system_prompt]},
+            {'role': 'user', 'parts': [user_message]}
+        ])
         
-        # Attempt to parse the response as JSON
+        # Extract and validate JSON configuration
         try:
-            return json.loads(response)
-        except json.JSONDecodeError:
-            # Extract JSON from the response if it's not properly formatted
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group(0))
-            else:
-                # If JSON extraction fails, return None and let the calling function handle it
+            config = json.loads(response.text)
+            
+            # Validate required fields
+            required_fields = ['type', 'title']
+            missing_fields = [field for field in required_fields if field not in config]
+            if missing_fields:
+                print(f"Warning: Missing required fields in visualization config: {missing_fields}")
                 return None
+            
+            # Validate column names
+            if 'x' in config and config['x'] not in data.columns:
+                print(f"Warning: x-axis column '{config['x']}' not found in data")
+                return None
+            if 'y' in config and config['y'] not in data.columns:
+                print(f"Warning: y-axis column '{config['y']}' not found in data")
+                return None
+            
+            return config
+            
+        except json.JSONDecodeError as e:
+            print(f"Error parsing visualization configuration: {str(e)}")
+            return None
+            
     except Exception as e:
-        # If there's an error, return None and let the calling function handle it
+        print(f"Error generating visualization configuration: {str(e)}")
         return None
