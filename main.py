@@ -443,7 +443,7 @@ def handle_query(user_input):
                 # Process the response and create visualization
                 if response:
                     try:
-                        # Parse the response
+                # Parse the response
                         parsed_response = parse_ai_response(response)
                         
                         # Debug logging
@@ -465,44 +465,44 @@ def handle_query(user_input):
                                 vis_params = parsed_response.get("visualization_params", {})
                                 
                                 visualization = create_and_display_visualization(
-                                    result,
-                                    vis_type,
+                                result, 
+                                vis_type, 
                                     user_input,
                                     vis_params
-                                )
-                                
-                                # Prepare response
-                                processing_result = {
-                                    "result": result,
-                                    "visualization": visualization,
-                                    "explanation": parsed_response.get("explanation", "")
-                                }
-                    
-                    except Exception as e:
-                        st.error(f"Error processing AI response: {str(e)}")
+                            )
+                            
+                            # Prepare response
+                            processing_result = {
+                                "result": result,
+                                "visualization": visualization,
+                                "explanation": parsed_response.get("explanation", "")
+                            }
                 
+                except Exception as e:
+                        st.error(f"Error processing AI response: {str(e)}")
+            
             except Exception as e:
                 st.error(f"Error processing data query: {str(e)}")
         
         # Generate final response
         if processing_result:
-            assistant_message = {
-                "role": "assistant",
+        assistant_message = {
+            "role": "assistant",
                 "content": processing_result["explanation"]
-            }
-            
+        }
+        
             if "visualization" in processing_result and processing_result["visualization"]:
-                assistant_message["visualization"] = processing_result["visualization"]
-                
-                # Log the visualization
-                log_action(
-                    st.session_state.user_id,
-                    "visualization",
-                    {
-                        "type": processing_result["visualization"]["type"],
-                        "query": user_input
-                    }
-                )
+            assistant_message["visualization"] = processing_result["visualization"]
+            
+            # Log the visualization
+            log_action(
+                st.session_state.user_id,
+                "visualization",
+                {
+                    "type": processing_result["visualization"]["type"],
+                    "query": user_input
+                }
+            )
         else:
             # Handle non-data queries or failed data queries
             response = query_gemini(
@@ -680,22 +680,22 @@ def get_general_system_prompt():
 
 def handle_error(e, user_input):
     """Handle errors in a consistent way."""
-    error_message = f"I encountered an error while processing your request: {str(e)}"
-    st.session_state.chat_history.append({"role": "assistant", "content": error_message})
-    
+        error_message = f"I encountered an error while processing your request: {str(e)}"
+        st.session_state.chat_history.append({"role": "assistant", "content": error_message})
+        
     # Save to conversation if available
     if st.session_state.conversation_id:
         add_message_to_conversation(
             st.session_state.conversation_id,
             {"role": "assistant", "content": error_message}
         )
-    
-    # Log the error
-    log_action(
-        st.session_state.user_id,
-        "error",
-        {"error": str(e), "query": user_input}
-    )
+        
+        # Log the error
+        log_action(
+            st.session_state.user_id,
+            "error",
+            {"error": str(e), "query": user_input}
+        )
     
     # Display the error in the UI
     st.error(f"Error: {str(e)}")

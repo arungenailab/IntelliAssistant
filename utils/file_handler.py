@@ -131,8 +131,16 @@ def generate_preview(df, max_rows=5):
     Returns:
         dict: Dataframe preview information
     """
+    # Create a copy for the head preview to avoid modifying the original
+    preview_df = df.head(max_rows).copy()
+    
+    # Convert datetime columns to string for the head preview
+    for col in preview_df.columns:
+        if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
+            preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+    
     preview = {
-        "head": df.head(max_rows).to_dict(orient='records'),
+        "head": preview_df.to_dict(orient='records'),
         "shape": df.shape,
         "columns": list(df.columns),
         "dtypes": {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)},

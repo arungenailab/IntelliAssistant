@@ -4,42 +4,50 @@ import Plot from 'react-plotly.js';
 import DownloadIcon from '@mui/icons-material/Download';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
+import ReactMarkdown from 'react-markdown';
+import rehypeRaw from 'rehype-raw';
+import remarkGfm from 'remark-gfm';
 
 const AnalysisResult = ({ response, visualization }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [plotData, setPlotData] = useState(null);
-  const [plotLayout, setPlotLayout] = useState(null);
-  const [plotConfig, setPlotConfig] = useState(null);
-  const [error, setError] = useState(null);
+  const [plotData, setPlotData] = useState([]);
+  const [plotLayout, setPlotLayout] = useState({});
+  const [plotConfig, setPlotConfig] = useState({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   
   useEffect(() => {
-    // Process visualization data when it changes
     if (visualization) {
       try {
         setLoading(true);
+        console.log('Processing visualization data:', visualization);
         
         // Handle different visualization formats
-        if (visualization.data) {
-          // Direct data format
+        if (visualization.data && visualization.data.data) {
+          console.log('Using direct data format with nested data property');
           setPlotData(visualization.data.data || []);
           setPlotLayout(visualization.data.layout || {});
           setPlotConfig(visualization.data.config || {});
+        } else if (visualization.data) {
+          console.log('Using direct data format');
+          // This is for the case where data is an array directly
+          setPlotData(Array.isArray(visualization.data) ? visualization.data : [visualization.data]);
+          setPlotLayout(visualization.layout || {});
+          setPlotConfig(visualization.config || {});
         } else if (visualization.type && visualization.fig) {
-          // Legacy format
+          console.log('Using legacy format');
           setPlotData(visualization.fig.data || []);
           setPlotLayout(visualization.fig.layout || {});
           setPlotConfig({});
         } else if (visualization.visualization_params) {
-          // Parameters format - convert to Plotly format
+          console.log('Using parameters format');
           const params = visualization.visualization_params;
           const visType = visualization.type || params.type || 'bar';
           
-          // Create appropriate data structure based on visualization type
+          console.log('Creating Plotly data with:', { visType, params });
           const data = createPlotlyData(visType, params);
           setPlotData(data);
           
-          // Create layout
           const layout = {
             title: params.title || 'Data Visualization',
             xaxis: { title: params.x },
@@ -48,15 +56,47 @@ const AnalysisResult = ({ response, visualization }) => {
           setPlotLayout(layout);
           setPlotConfig({});
         } else {
-          setError('Invalid visualization format');
+          // Try to handle the case where the visualization object itself contains the necessary properties
+          console.log('Trying to extract data directly from visualization object');
+          if (visualization.type) {
+            // This is likely our backend format
+            const visType = visualization.type;
+            const title = visualization.title || 'Data Visualization';
+            
+            // Check if we have a direct data array in the visualization
+            if (Array.isArray(visualization.data)) {
+              setPlotData(visualization.data);
+            } else {
+              // Create a default data structure based on the type
+              setPlotData([{
+                type: visType,
+                x: visualization.x_data || [],
+                y: visualization.y_data || [],
+                name: visualization.name || '',
+                marker: { color: visualization.color || '#3366ff' }
+              }]);
+            }
+            
+            setPlotLayout({
+              title: title,
+              xaxis: { title: visualization.x || '' },
+              yaxis: { title: visualization.y || '' }
+            });
+            setPlotConfig({});
+          } else {
+            console.error('Invalid visualization format:', visualization);
+            setError('Invalid visualization format - missing required data');
+          }
         }
       } catch (err) {
         console.error('Error processing visualization:', err);
-        setError('Error processing visualization data');
+        console.error('Visualization data:', visualization);
+        setError(`Error processing visualization data: ${err.message}`);
       } finally {
         setLoading(false);
       }
     } else {
+      console.log('No visualization data provided');
       setLoading(false);
     }
   }, [visualization]);
@@ -193,7 +233,52 @@ const AnalysisResult = ({ response, visualization }) => {
       {/* Text response if available */}
       {response && (
         <Box sx={{ mb: 3 }}>
-          <Typography variant="body2">{response}</Typography>
+          <ReactMarkdown
+            rehypePlugins={[rehypeRaw]}
+            remarkPlugins={[remarkGfm]}
+            components={{
+              p: ({ node, ...props }) => <Typography variant="body2" component="p" sx={{ my: 1 }} {...props} />,
+              h1: ({ node, ...props }) => <Typography variant="h4" component="h1" sx={{ mt: 3, mb: 2 }} {...props} />,
+              h2: ({ node, ...props }) => <Typography variant="h5" component="h2" sx={{ mt: 2.5, mb: 1.5 }} {...props} />,
+              h3: ({ node, ...props }) => <Typography variant="h6" component="h3" sx={{ mt: 2, mb: 1 }} {...props} />,
+              h4: ({ node, ...props }) => <Typography variant="subtitle1" component="h4" sx={{ mt: 2, mb: 1 }} {...props} />,
+              li: ({ node, ...props }) => <Typography component="li" variant="body2" sx={{ mb: 0.5 }} {...props} />,
+              ul: ({ node, ...props }) => <Box component="ul" sx={{ pl: 2, mb: 2 }} {...props} />,
+              ol: ({ node, ...props }) => <Box component="ol" sx={{ pl: 2, mb: 2 }} {...props} />,
+              table: ({ node, ...props }) => (
+                <Box sx={{ overflowX: 'auto', my: 2 }}>
+                  <table style={{ borderCollapse: 'collapse', width: '100%' }} {...props} />
+                </Box>
+              ),
+              tr: ({ node, ...props }) => <tr style={{ borderBottom: '1px solid rgba(0, 0, 0, 0.1)' }} {...props} />,
+              th: ({ node, ...props }) => (
+                <th style={{ padding: '8px 16px', textAlign: 'left', backgroundColor: 'rgba(0, 0, 0, 0.04)' }} {...props} />
+              ),
+              td: ({ node, ...props }) => <td style={{ padding: '8px 16px' }} {...props} />,
+              code: ({ node, inline, ...props }) => (
+                inline ? 
+                <Typography component="code" sx={{ 
+                  backgroundColor: 'rgba(0, 0, 0, 0.04)', 
+                  padding: '2px 4px',
+                  borderRadius: '4px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.875rem' 
+                }} {...props} /> :
+                <Box component="pre" sx={{
+                  backgroundColor: 'rgba(0, 0, 0, 0.04)',
+                  padding: 2,
+                  borderRadius: 1,
+                  overflowX: 'auto',
+                  fontFamily: 'monospace',
+                  fontSize: '0.875rem'
+                }}>
+                  <code {...props} />
+                </Box>
+              )
+            }}
+          >
+            {response}
+          </ReactMarkdown>
         </Box>
       )}
       

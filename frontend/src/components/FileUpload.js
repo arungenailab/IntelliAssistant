@@ -102,8 +102,8 @@ const FileUpload = ({ onUploadSuccess }) => {
         setPreview(response.preview);
         
         // Call the callback function if provided
-        if (onUploadSuccess) {
-          onUploadSuccess(response);
+      if (onUploadSuccess) {
+        onUploadSuccess(response);
         }
       } else {
         throw new Error(response.error || 'Failed to upload file');
@@ -183,10 +183,10 @@ const FileUpload = ({ onUploadSuccess }) => {
       >
         <Typography variant="h6" sx={{ fontWeight: 600 }}>
           Upload Dataset
-        </Typography>
+      </Typography>
         <Tooltip title="Reset form">
-          <IconButton 
-            size="small" 
+                <IconButton
+                  size="small"
             onClick={handleReset}
             disabled={loading}
             sx={{ 
@@ -195,7 +195,7 @@ const FileUpload = ({ onUploadSuccess }) => {
             }}
           >
             <RefreshIcon fontSize="small" />
-          </IconButton>
+                </IconButton>
         </Tooltip>
       </Box>
       
@@ -212,17 +212,17 @@ const FileUpload = ({ onUploadSuccess }) => {
                 color: success ? 'success.main' : 'error.main'
               }
             }}
-            action={
-              <IconButton
-                size="small"
-                onClick={() => setShowAlert(false)}
-              >
+              action={
+                <IconButton
+                  size="small"
+                  onClick={() => setShowAlert(false)}
+                >
                 <CloseIcon fontSize="small" />
-              </IconButton>
-            }
-          >
+                </IconButton>
+              }
+            >
             {success ? 'File uploaded successfully!' : error}
-          </Alert>
+            </Alert>
         )}
         
         {/* File Input */}
@@ -268,7 +268,7 @@ const FileUpload = ({ onUploadSuccess }) => {
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Supports CSV and Excel files (max 10MB)
-              </Typography>
+            </Typography>
             </>
           )}
         </Box>
@@ -308,11 +308,11 @@ const FileUpload = ({ onUploadSuccess }) => {
         </Button>
         
         {/* Data Preview */}
-        {preview && (
+      {preview && (
           <Box sx={{ mt: 3 }}>
             <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 600 }}>
-              Data Preview
-            </Typography>
+            Data Preview
+          </Typography>
             
             <TableContainer 
               component={Paper} 
@@ -324,8 +324,8 @@ const FileUpload = ({ onUploadSuccess }) => {
               }}
             >
               <Table size="small" stickyHeader>
-                <TableHead>
-                  <TableRow>
+              <TableHead>
+                <TableRow>
                     {preview.columns.map((column, index) => (
                       <TableCell 
                         key={index}
@@ -361,15 +361,15 @@ const FileUpload = ({ onUploadSuccess }) => {
                           }}
                         >
                           {row[column] !== null && row[column] !== undefined ? String(row[column]) : ''}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-        )}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+      )}
       </Box>
     </Paper>
   );

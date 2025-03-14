@@ -1,0 +1,5 @@
+{
+  "price_volume_chart": "<<JSON data>>",
+  "top_days_chart": "<<JSON data>>",
+  "price_distribution": "<<JSON data>>"
+}

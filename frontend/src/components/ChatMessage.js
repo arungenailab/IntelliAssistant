@@ -1,19 +1,63 @@
 import React from 'react';
-import { Box, Typography, Paper, IconButton, Divider, CircularProgress, Tooltip } from '@mui/material';
+import { Box, Typography, Paper, IconButton, Divider, CircularProgress, Tooltip, Avatar } from '@mui/material';
 import ThumbUpIcon from '@mui/icons-material/ThumbUp';
 import ThumbDownIcon from '@mui/icons-material/ThumbDown';
 import BookmarkIcon from '@mui/icons-material/Bookmark';
 import ShareIcon from '@mui/icons-material/Share';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import AnalysisResult from './AnalysisResult';
+import PersonIcon from '@mui/icons-material/Person';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
+
+// Helper function to format message content
+const formatMessage = (content) => {
+  if (!content) return '';
+  return content;
+};
+
+// Helper function to format timestamps
+const formatTimestamp = (timestamp) => {
+  if (!timestamp) return '';
+  
+  try {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return '';
+  }
+};
+
+// Helper function to render visualizations
+const renderVisualization = (visualization) => {
+  if (!visualization) return null;
+  
+  return (
+    <Box sx={{ width: '100%', maxWidth: '800px' }}>
+      <AnalysisResult visualization={visualization} />
+    </Box>
+  );
+};
 
 const ChatMessage = ({ message, isLoading }) => {
   const isUser = message.role === 'user';
+  const isError = message.error;
+  
+  // Check if model information is available
+  const hasModelInfo = message.model_used && message.model_version;
+  const isFallback = message.is_fallback;
   
   const handleCopyContent = () => {
-    navigator.clipboard.writeText(message.content);
+    if (message.content) {
+      navigator.clipboard.writeText(message.content)
+        .then(() => {
+          console.log('Content copied to clipboard');
+        })
+        .catch(err => {
+          console.error('Failed to copy: ', err);
+        });
+    }
   };
-  
+
   return (
     <Box
       sx={{
@@ -55,16 +99,14 @@ const ChatMessage = ({ message, isLoading }) => {
               flexShrink: 0,
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M21 11.5C21.0034 12.8199 20.6951 14.1219 20.1 15.3C19.3944 16.7118 18.3098 17.8992 16.9674 18.7293C15.6251 19.5594 14.0782 19.9994 12.5 20C11.1801 20.0035 9.87812 19.6951 8.7 19.1L3 21L4.9 15.3C4.30493 14.1219 3.99656 12.8199 4 11.5C4.00061 9.92179 4.44061 8.37488 5.27072 7.03258C6.10083 5.69028 7.28825 4.6056 8.7 3.90003C9.87812 3.30496 11.1801 2.99659 12.5 3.00003H13C15.0843 3.11502 17.053 3.99479 18.5291 5.47089C20.0052 6.94699 20.885 8.91568 21 11V11.5Z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
+            <SmartToyIcon sx={{ fontSize: 16, color: 'white' }} />
           </Box>
         )}
         
-        <Paper
+        <Paper 
           elevation={0}
-          sx={{
-            p: 2,
+          sx={{ 
+            p: 2, 
             maxWidth: isUser ? '85%' : '90%',
             borderRadius: 1.5,
             bgcolor: isUser ? 'primary.light' : 'background.paper',
@@ -86,7 +128,7 @@ const ChatMessage = ({ message, isLoading }) => {
           ) : (
             <Typography 
               variant="body1" 
-              component="div" 
+              component="div"
               sx={{ 
                 whiteSpace: 'pre-wrap',
                 fontFamily: 'inherit',
@@ -144,8 +186,46 @@ const ChatMessage = ({ message, isLoading }) => {
                 }
               }}
             >
-              {message.content}
+              {formatMessage(message.content)}
             </Typography>
+          )}
+          
+          {/* Model information display for AI messages */}
+          {!isUser && hasModelInfo && (
+            <Box 
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                mt: 1.5,
+                pt: 1,
+                borderTop: theme => `1px solid ${theme.palette.divider}`,
+                opacity: 0.7,
+                fontSize: '0.75rem',
+                color: 'text.secondary'
+              }}
+            >
+              <SmartToyIcon sx={{ fontSize: '0.875rem', mr: 0.5 }} />
+              <Typography variant="caption">
+                {`Model: ${message.model_used} (v${message.model_version})`}
+                {isFallback && (
+                  <Typography 
+                    component="span" 
+                    variant="caption" 
+                    sx={{ 
+                      ml: 1, 
+                      color: 'warning.main',
+                      bgcolor: 'warning.light',
+                      px: 0.5,
+                      py: 0.1,
+                      borderRadius: 0.5,
+                      fontWeight: 500
+                    }}
+                  >
+                    Fallback
+                  </Typography>
+                )}
+              </Typography>
+            </Box>
           )}
           
           {/* Loading indicator */}
@@ -159,9 +239,11 @@ const ChatMessage = ({ message, isLoading }) => {
           {!isUser && message.visualization && (
             <>
               <Divider sx={{ my: 2 }} />
-              <AnalysisResult 
-                visualization={message.visualization} 
-              />
+              <Box sx={{ width: '100%' }}>
+                <AnalysisResult 
+                  visualization={message.visualization} 
+                />
+              </Box>
             </>
           )}
           
@@ -198,7 +280,7 @@ const ChatMessage = ({ message, isLoading }) => {
               fontSize: '0.7rem',
             }}
           >
-            {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            {formatTimestamp(message.timestamp)}
           </Typography>
         </Paper>
       </Box>

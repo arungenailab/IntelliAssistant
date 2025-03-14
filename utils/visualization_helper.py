@@ -3,54 +3,110 @@ import plotly.express as px
 import plotly.graph_objects as go
 import json
 import traceback
+import numpy as np
 
-def create_visualization(data, plot_type, query, params=None):
+def create_visualization(data, plot_type, user_query=None, params=None):
     """
-    Create a visualization using Plotly based on the provided parameters.
+    Create a visualization based on the data and parameters.
     
     Args:
-        data (pd.DataFrame): Input data
-        plot_type (str): Type of plot to create
-        query (str): User's query
-        params (dict): Additional visualization parameters
+        data (pd.DataFrame): The data to visualize
+        plot_type (str): The type of plot to create (bar, line, scatter, etc.)
+        user_query (str, optional): The user's query
+        params (dict, optional): Parameters for the visualization
         
     Returns:
-        dict: Visualization configuration and data
+        dict: The visualization data
     """
     try:
-        print(f"Creating visualization with type: {plot_type}")
-        print(f"Data shape: {data.shape}")
-        print(f"Parameters: {params}")
-        
-        if params is None:
-            params = {}
-        
-        # Extract parameters
+        # Default parameters
         x = params.get('x')
         y = params.get('y')
         color = params.get('color')
         facet = params.get('facet')
-        title = params.get('title', 'Data Visualization')
+        title = params.get('title', f"{plot_type.capitalize()} Chart")
         orientation = params.get('orientation', 'vertical')
-        aggregation = params.get('aggregation', 'sum')
+        aggregation = params.get('aggregation')
+        top_n = params.get('top_n')
+        sort_by = params.get('sort_by', y)
+        ascending = params.get('ascending', False)
+        show_values = params.get('show_values', True)
+        value_position = params.get('value_position', 'auto')
+        marker_color = params.get('marker_color', '#3366ff')
+        tick_angle = params.get('tick_angle', -45)
+        font_family = params.get('font_family', 'Arial, sans-serif')
+        base_font_size = params.get('base_font_size', 14)
+        title_font_size = params.get('title_font_size', 18)
         
-        print(f"Using columns - x: {x}, y: {y}, color: {color}, facet: {facet}")
+        # Legend position
+        legend_position = params.get('legend_position', {
+            'orientation': 'h',
+            'yanchor': 'bottom',
+            'y': 1.02,
+            'xanchor': 'right',
+            'x': 1
+        })
         
-        # Prepare the data
+        # Margins
+        margins = params.get('margins', {
+            't': 50,
+            'l': 50,
+            'r': 50,
+            'b': 100
+        })
+        
+        # If data parameter is provided in params, use it directly
+        if 'data' in params:
+            print("[DEBUG] Using data from params")
+            # Extract the data from params but ensure we still have the original data for processing
+            params_data = params.get('data')
+            
+            # Create the visualization
+            print(f"Creating {plot_type} plot")
+            
+            # Create result with the provided data
+            result = {
+                'type': plot_type,
+                'title': title,
+                'data': params_data
+            }
+            print("Creating visualization result")
+            print("Successfully created visualization")
+            return result
+        
+        # Debug information
+        print(f"[DEBUG] Plot type: {plot_type}")
+        print(f"[DEBUG] Data shape: {data.shape}")
+        print(f"[DEBUG] Data columns: {data.columns.tolist()}")
+        print(f"[DEBUG] Parameters: {params}")
+        print(f"[DEBUG] Using columns - x: {x}, y: {y}, color: {color}, facet: {facet}")
+        
+        # Process data based on parameters
+        plot_data = data.copy()
+        
+        # Aggregate data if needed
         if aggregation and x and y:
-            print(f"Aggregating data with method: {aggregation}")
+            print(f"[DEBUG] Aggregating data with method: {aggregation}")
             if aggregation == 'sum':
                 plot_data = data.groupby(x)[y].sum().reset_index()
             elif aggregation == 'mean':
                 plot_data = data.groupby(x)[y].mean().reset_index()
             elif aggregation == 'count':
                 plot_data = data.groupby(x)[y].count().reset_index()
-            elif aggregation == 'distribution':
-                # For distribution plots, we don't aggregate
-                plot_data = data
-            else:
-                plot_data = data
-            print(f"Aggregated data shape: {plot_data.shape}")
+            elif aggregation == 'min':
+                plot_data = data.groupby(x)[y].min().reset_index()
+            elif aggregation == 'max':
+                plot_data = data.groupby(x)[y].max().reset_index()
+            
+            # Sort data
+            if sort_by:
+                plot_data = plot_data.sort_values(by=sort_by, ascending=ascending)
+            
+            # Take top N if specified
+            if top_n and top_n > 0:
+                plot_data = plot_data.head(top_n)
+            
+            print(f"[DEBUG] Processed data shape: {plot_data.shape}")
         else:
             plot_data = data
         
@@ -61,122 +117,75 @@ def create_visualization(data, plot_type, query, params=None):
         plot_data_list = []
         
         if plot_type == 'bar':
-            if color:
-                # Create grouped bar chart
-                for group in plot_data[color].unique():
-                    group_data = plot_data[plot_data[color] == group]
-                    plot_data_list.append({
-                        'type': 'bar',
-                        'x': group_data[x].tolist(),
-                        'y': group_data[y].tolist(),
-                        'name': str(group)
-                    })
-            else:
-                plot_data_list = [{
-                    'type': 'bar',
-                    'x': plot_data[x].tolist(),
-                    'y': plot_data[y].tolist(),
-                    'name': y.title()
-                }]
-                
-        elif plot_type == 'line':
-            if color:
-                # Create multi-line chart
-                for group in plot_data[color].unique():
-                    group_data = plot_data[plot_data[color] == group]
-                    plot_data_list.append({
-                        'type': 'scatter',
-                        'mode': 'lines+markers',
-                        'x': group_data[x].tolist(),
-                        'y': group_data[y].tolist(),
-                        'name': str(group)
-                    })
-            else:
-                plot_data_list = [{
-                    'type': 'scatter',
-                    'mode': 'lines+markers',
-                    'x': plot_data[x].tolist(),
-                    'y': plot_data[y].tolist(),
-                    'name': y.title()
-                }]
-                
-        elif plot_type == 'scatter':
-            plot_data_list = [{
-                'type': 'scatter',
-                'mode': 'markers',
-                'x': plot_data[x].tolist(),
-                'y': plot_data[y].tolist(),
-                'marker': {
-                    'color': plot_data[color].tolist() if color else None,
-                    'colorscale': 'Viridis'
-                },
-                'name': y.title()
-            }]
-            
-        elif plot_type == 'pie':
-            plot_data_list = [{
-                'type': 'pie',
-                'labels': plot_data[x].tolist(),
-                'values': plot_data[y].tolist(),
-                'name': y.title()
-            }]
-            
-        elif plot_type == 'histogram':
-            plot_data_list = [{
-                'type': 'histogram',
-                'x': plot_data[x].tolist(),
-                'nbinsx': 30,
-                'name': x.title()
-            }]
-            
-        elif plot_type == 'box':
-            if color:
-                # Create grouped box plot
-                for group in plot_data[color].unique():
-                    group_data = plot_data[plot_data[color] == group]
-                    plot_data_list.append({
-                        'type': 'box',
-                        'y': group_data[y].tolist(),
-                        'name': str(group)
-                    })
-            else:
-                plot_data_list = [{
-                    'type': 'box',
-                    'y': plot_data[y].tolist(),
-                    'name': y.title()
-                }]
-                
-        else:
-            print(f"Unknown plot type: {plot_type}, defaulting to bar chart")
-            plot_data_list = [{
+            trace = {
                 'type': 'bar',
-                'x': plot_data[x].tolist(),
-                'y': plot_data[y].tolist(),
-                'name': y.title()
-            }]
+                'name': y.replace('_', ' ').title() if y else 'Value',
+                'orientation': 'v' if orientation == 'vertical' else 'h',
+                'marker': {
+                    'color': marker_color
+                }
+            }
+            
+            # Only add x and y data if they are provided
+            if x is not None and y is not None:
+                if orientation == 'vertical':
+                    trace['x'] = plot_data[x].tolist()
+                    trace['y'] = plot_data[y].tolist()
+                else:
+                    trace['x'] = plot_data[y].tolist()
+                    trace['y'] = plot_data[x].tolist()
+                
+                # Add value labels if requested
+                if show_values:
+                    trace['text'] = plot_data[y].round(0).astype(int).tolist()
+                    trace['textposition'] = value_position
+            
+            plot_data_list.append(trace)
         
-        # Create layout
+        # Create layout with dynamic configuration
         layout = {
             'title': title,
             'showlegend': True,
-            'legend': {
-                'orientation': 'h',
-                'yanchor': 'bottom',
-                'y': 1.02,
-                'xanchor': 'right',
-                'x': 1
+            'legend': legend_position,
+            'margin': margins,
+            'xaxis': {
+                'title': x.replace('_', ' ').title() if x else '',
+                'tickangle': tick_angle if orientation == 'vertical' else 0,
+                'automargin': True
             },
-            'margin': {'t': 50, 'l': 50, 'r': 50, 'b': 50},
-            'xaxis': {'title': x.title() if x else ''},
-            'yaxis': {'title': y.title() if y else ''}
+            'yaxis': {
+                'title': y.replace('_', ' ').title() if y else '',
+                'automargin': True
+            },
+            'hovermode': 'closest',
+            'font': {
+                'family': font_family,
+                'size': base_font_size
+            },
+            'titlefont': {
+                'family': font_family,
+                'size': title_font_size
+            }
         }
         
-        # Add faceting if specified
-        if facet:
-            layout['grid'] = {'rows': len(plot_data[facet].unique()), 'columns': 1}
-            layout['height'] = 300 * len(plot_data[facet].unique())
+        # Add color axis if color parameter is provided
+        if color and color in data.columns:
+            layout['coloraxis'] = {'colorbar': {'title': color.replace('_', ' ').title()}}
         
         print("Creating visualization result")
+        
+        # Ensure all data is JSON serializable
+        for i, trace in enumerate(plot_data_list):
+            # Convert any datetime values to strings
+            if 'x' in trace and isinstance(trace['x'], (list, pd.Series, np.ndarray)):
+                plot_data_list[i]['x'] = [str(val) if pd.api.types.is_datetime64_dtype(pd.Series([val])) or 
+                                         isinstance(val, (pd.Timestamp, np.datetime64)) else val 
+                                         for val in trace['x']]
+            
+            if 'y' in trace and isinstance(trace['y'], (list, pd.Series, np.ndarray)):
+                plot_data_list[i]['y'] = [float(val) if isinstance(val, (int, float, np.number)) else str(val) 
+                                         for val in trace['y']]
+        
         result = {
             'type': plot_type,
             'title': title,
@@ -197,4 +206,4 @@ def create_visualization(data, plot_type, query, params=None):
     except Exception as e:
         print(f"Error creating visualization: {str(e)}")
         print(f"Traceback: {traceback.format_exc()}")
-        return None
+        return None 

@@ -44,7 +44,10 @@ const DatasetSelector = ({ onDatasetSelect }) => {
     setError('');
     
     try {
+      console.log('Fetching datasets...');
       const data = await getDatasets();
+      console.log('Datasets received:', data);
+      
       if (!data) {
         throw new Error('No data received from server');
       }
@@ -52,7 +55,10 @@ const DatasetSelector = ({ onDatasetSelect }) => {
       
       // If there's only one dataset, select it automatically
       const datasetNames = Object.keys(data);
+      console.log('Dataset names:', datasetNames);
+      
       if (datasetNames.length === 1) {
+        console.log('Auto-selecting the only dataset:', datasetNames[0]);
         setSelectedDataset(datasetNames[0]);
         if (onDatasetSelect) {
           onDatasetSelect(datasetNames[0], data[datasetNames[0]]);
@@ -69,10 +75,12 @@ const DatasetSelector = ({ onDatasetSelect }) => {
   // Handle dataset selection change
   const handleDatasetChange = (event) => {
     const datasetName = event.target.value;
+    console.log('Dataset selected:', datasetName);
     setSelectedDataset(datasetName);
     
     // Call the parent component's callback if provided
     if (onDatasetSelect && datasetName) {
+      console.log('Calling onDatasetSelect with:', datasetName, datasets[datasetName]);
       onDatasetSelect(datasetName, datasets[datasetName]);
     }
   };
@@ -147,8 +155,8 @@ const DatasetSelector = ({ onDatasetSelect }) => {
             <StorageIcon fontSize="small" />
           </Box>
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            Available Datasets
-          </Typography>
+        Available Datasets
+      </Typography>
         </Box>
         {selectedDataset && (
           <Button 
@@ -173,7 +181,7 @@ const DatasetSelector = ({ onDatasetSelect }) => {
       </Box>
       
       <Box sx={{ p: 2 }}>
-        {loading ? (
+      {loading ? (
           <Box sx={{ width: '100%' }}>
             <Skeleton variant="rectangular" width="100%" height={48} sx={{ borderRadius: 1, mb: 2 }} />
             <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
@@ -181,8 +189,8 @@ const DatasetSelector = ({ onDatasetSelect }) => {
               <Skeleton variant="rectangular" width={100} height={28} sx={{ borderRadius: 1 }} />
               <Skeleton variant="rectangular" width={90} height={28} sx={{ borderRadius: 1 }} />
             </Box>
-          </Box>
-        ) : error ? (
+        </Box>
+      ) : error ? (
           <Alert 
             severity="error" 
             sx={{ 
@@ -193,9 +201,9 @@ const DatasetSelector = ({ onDatasetSelect }) => {
               }
             }}
           >
-            {error}
-          </Alert>
-        ) : Object.keys(datasets).length === 0 ? (
+          {error}
+        </Alert>
+      ) : Object.keys(datasets).length === 0 ? (
           <Alert 
             severity="info" 
             sx={{ 
@@ -205,18 +213,18 @@ const DatasetSelector = ({ onDatasetSelect }) => {
               }
             }}
           >
-            No datasets available. Please upload a data file first.
-          </Alert>
-        ) : (
-          <>
+          No datasets available. Please upload a data file first.
+        </Alert>
+      ) : (
+        <>
             <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel id="dataset-select-label">Select Dataset</InputLabel>
-              <Select
-                labelId="dataset-select-label"
-                id="dataset-select"
-                value={selectedDataset}
-                label="Select Dataset"
-                onChange={handleDatasetChange}
+            <InputLabel id="dataset-select-label">Select Dataset</InputLabel>
+            <Select
+              labelId="dataset-select-label"
+              id="dataset-select"
+              value={selectedDataset}
+              label="Select Dataset"
+              onChange={handleDatasetChange}
                 size="medium"
                 sx={{
                   borderRadius: 1,
@@ -231,11 +239,11 @@ const DatasetSelector = ({ onDatasetSelect }) => {
                     borderColor: 'rgba(0, 0, 0, 0.3)',
                   },
                 }}
-              >
-                {Object.keys(datasets).map((name) => {
-                  const shape = getDatasetShape(name);
-                  return (
-                    <MenuItem key={name} value={name}>
+            >
+              {Object.keys(datasets).map((name) => {
+                const shape = getDatasetShape(name);
+                return (
+                  <MenuItem key={name} value={name}>
                       <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                         <Typography sx={{ fontWeight: 500 }}>
                           {name}
@@ -266,18 +274,18 @@ const DatasetSelector = ({ onDatasetSelect }) => {
                           />
                         </Box>
                       </Box>
-                    </MenuItem>
-                  );
-                })}
-              </Select>
-            </FormControl>
-            
+                  </MenuItem>
+                );
+              })}
+            </Select>
+          </FormControl>
+          
             {selectedDataset && (
               <>
                 <Box sx={{ mb: 1, display: 'flex', alignItems: 'center' }}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                     Columns
-                  </Typography>
+                </Typography>
                   <Tooltip title="These are the columns available in your dataset">
                     <InfoOutlinedIcon fontSize="small" sx={{ ml: 0.5, color: 'text.secondary', fontSize: 16 }} />
                   </Tooltip>
@@ -307,8 +315,8 @@ const DatasetSelector = ({ onDatasetSelect }) => {
                     <Tooltip title="This is a preview of your dataset">
                       <InfoOutlinedIcon fontSize="small" sx={{ ml: 0.5, color: 'text.secondary', fontSize: 16 }} />
                     </Tooltip>
-                  </Box>
-                  
+              </Box>
+              
                   <TableContainer 
                     component={Paper} 
                     elevation={0}
@@ -319,8 +327,8 @@ const DatasetSelector = ({ onDatasetSelect }) => {
                     }}
                   >
                     <Table size="small" stickyHeader>
-                      <TableHead>
-                        <TableRow>
+                  <TableHead>
+                    <TableRow>
                           {getSelectedDatasetColumns().map((column, index) => (
                             <TableCell 
                               key={index}
@@ -333,10 +341,10 @@ const DatasetSelector = ({ onDatasetSelect }) => {
                             >
                               {column}
                             </TableCell>
-                          ))}
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
+                      ))}
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
                         {getSelectedDatasetPreview().map((row, rowIndex) => (
                           <TableRow 
                             key={rowIndex}
@@ -356,18 +364,18 @@ const DatasetSelector = ({ onDatasetSelect }) => {
                                 }}
                               >
                                 {row[column] !== null && row[column] !== undefined ? String(row[column]) : ''}
-                              </TableCell>
-                            ))}
-                          </TableRow>
+                          </TableCell>
                         ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
                 </Collapse>
-              </>
-            )}
-          </>
-        )}
+            </>
+          )}
+        </>
+      )}
       </Box>
     </Paper>
   );

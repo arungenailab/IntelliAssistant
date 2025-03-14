@@ -2,6 +2,21 @@
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
+## Environment Configuration
+
+The application uses environment variables for configuration. Create a `.env` file in the frontend directory with the following variables:
+
+```
+# API Configuration
+REACT_APP_API_BASE_URL=http://localhost:5000/api
+```
+
+For production deployment, update the `.env` file or set environment variables with the appropriate values:
+
+```
+REACT_APP_API_BASE_URL=https://your-production-server.com/api
+```
+
 ## Available Scripts
 
 In the project directory, you can run:

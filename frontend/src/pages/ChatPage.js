@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Grid, Typography, Paper, IconButton, TextField, Button, Divider, List, ListItem, ListItemText, Avatar, CircularProgress, Alert } from '@mui/material';
+import { Box, Grid, Typography, Paper, IconButton, TextField, Button, Divider, List, ListItem, ListItemText, Avatar, CircularProgress, Alert, Dialog, DialogTitle, DialogContent } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import BookmarkIcon from '@mui/icons-material/Bookmark';
@@ -17,6 +17,11 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ReactDOM from 'react-dom/client';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CloseIcon from '@mui/icons-material/Close';
+import AddIcon from '@mui/icons-material/Add';
+import SearchIcon from '@mui/icons-material/Search';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import { useTheme } from '../contexts/ThemeContext';
+import ChatInput from '../components/ChatInput';
 
 // Create a modern theme with enhanced visual elements
 const theme = createTheme({
@@ -152,8 +157,37 @@ const ChatPage = () => {
     "Show top 5 customers by amount"
   ]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [datasetDialogOpen, setDatasetDialogOpen] = useState(false);
+  const [currentTheme, setCurrentTheme] = useState(document.documentElement.classList.contains('dark') ? 'dark' : 'light');
   
   const messagesEndRef = useRef(null);
+
+  // Listen for theme changes
+  useEffect(() => {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.attributeName === 'class') {
+          const newTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+          setCurrentTheme(newTheme);
+        }
+      });
+    });
+
+    observer.observe(document.documentElement, { attributes: true });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  // Update theme when currentTheme changes
+  useEffect(() => {
+    theme.palette.mode = currentTheme;
+    theme.palette.background.default = currentTheme === 'dark' ? '#121212' : '#f9fafb';
+    theme.palette.background.paper = currentTheme === 'dark' ? '#1e1e1e' : '#ffffff';
+    theme.palette.text.primary = currentTheme === 'dark' ? '#e0e0e0' : '#111827';
+    theme.palette.text.secondary = currentTheme === 'dark' ? '#a0a0a0' : '#6b7280';
+  }, [currentTheme]);
 
   useEffect(() => {
     // Load conversation history
@@ -174,13 +208,13 @@ const ChatPage = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSendMessage = async () => {
-    if (!inputValue.trim()) return;
+  const handleSendMessage = async (message, modelId = 'gemini-2.0-flash', useCache = true) => {
+    if (!message.trim()) return;
     
     const userMessage = {
       id: Date.now(),
       role: 'user',
-      content: inputValue,
+      content: message,
       timestamp: new Date().toISOString()
     };
     
@@ -201,23 +235,25 @@ const ChatPage = () => {
     
     try {
       // Enhance query with visualization request if needed
-      let enhancedQuery = inputValue;
+      let enhancedQuery = message;
       
       // Check if query is about data but doesn't mention visualization
       const dataTerms = ['data', 'analyze', 'show', 'display', 'chart', 'graph'];
       const visualizationTerms = ['chart', 'graph', 'plot', 'visualize', 'visualization'];
       
-      const isDataQuery = dataTerms.some(term => inputValue.toLowerCase().includes(term));
-      const mentionsVisualization = visualizationTerms.some(term => inputValue.toLowerCase().includes(term));
+      const isDataQuery = dataTerms.some(term => message.toLowerCase().includes(term));
+      const mentionsVisualization = visualizationTerms.some(term => message.toLowerCase().includes(term));
       
       if (isDataQuery && !mentionsVisualization && selectedDataset) {
-        enhancedQuery = `${inputValue}. Please include a visualization of the results.`;
+        enhancedQuery = `${message}. Please include a visualization of the results.`;
       }
       
       const response = await sendMessage(
         enhancedQuery, 
         activeConversation,
-        selectedDataset?.name
+        selectedDataset?.name,
+        modelId,
+        useCache
       );
       
       // Remove the loading message
@@ -244,7 +280,10 @@ const ChatPage = () => {
         content: response.text || response.message || 'I analyzed your request.',
         timestamp: new Date().toISOString(),
         visualization: visualizationData,
-        error: response.error
+        error: response.error,
+        model_used: response.model_used,
+        model_version: response.model_version,
+        is_fallback: response.is_fallback
       };
       
       setMessages(prev => [...prev, botMessage]);
@@ -256,7 +295,7 @@ const ChatPage = () => {
         setConversationHistory(prev => [
           { 
             id: response.conversationId, 
-            title: inputValue, 
+            title: message, 
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
             message_count: 2
@@ -285,45 +324,74 @@ const ChatPage = () => {
     }
   };
 
-  const handleNewChat = () => {
-    console.log('New Chat button clicked');
-    setMessages([]);
-    setInputValue('');
-    setActiveConversation(null);
-    console.log('Messages cleared, activeConversation set to null');
+  const handleConversationSelect = async (conversation) => {
+    try {
+      setActiveConversation(conversation);
+      const messages = await getConversationMessages(conversation.id);
+      setMessages(messages);
+    } catch (error) {
+      console.error('Error loading conversation messages:', error);
+    }
   };
 
-  const handleSelectConversation = async (conversationId) => {
-    try {
-      setIsLoading(true);
-      const messages = await getConversationMessages(conversationId);
-      setMessages(messages);
-      setActiveConversation(conversationId);
-    } catch (error) {
-      console.error('Error loading conversation:', error);
-    } finally {
-      setIsLoading(false);
-    }
+  const handleNewChat = () => {
+    setActiveConversation(null);
+    setMessages([]);
   };
 
   const handleSuggestedQuery = (query) => {
     setInputValue(query);
   };
 
-  const handleDatasetSelect = (name, info) => {
-    setSelectedDataset({ name, info });
+  const handleDatasetSelect = (datasetName, details) => {
+    setSelectedDataset({ name: datasetName, ...details });
+    setDatasetDialogOpen(false);
     
     // Update suggested queries based on dataset columns
-    if (info?.columns) {
-      const columns = info.columns;
-      const newQueries = [
-        `Show distribution of ${columns[0]}`,
-        `Compare ${columns[0]} by ${columns[1]}`,
-        `Analyze trends in ${columns[0]} over time`,
-        `Show top 5 records by ${columns[0]}`
-      ];
+    if (details && details.columns) {
+      const newQueries = generateQueriesFromColumns(details.columns);
       setSuggestedQueries(newQueries);
     }
+  };
+
+  const generateQueriesFromColumns = (columns) => {
+    const queries = [];
+    const numericColumns = columns.filter(col => 
+      col.toLowerCase().includes('amount') || 
+      col.toLowerCase().includes('price') || 
+      col.toLowerCase().includes('quantity') ||
+      col.toLowerCase().includes('sales')
+    );
+    
+    const timeColumns = columns.filter(col => 
+      col.toLowerCase().includes('date') || 
+      col.toLowerCase().includes('time') || 
+      col.toLowerCase().includes('year')
+    );
+    
+    const categoryColumns = columns.filter(col => 
+      col.toLowerCase().includes('category') || 
+      col.toLowerCase().includes('type') || 
+      col.toLowerCase().includes('region') ||
+      col.toLowerCase().includes('country')
+    );
+    
+    if (numericColumns.length > 0) {
+      queries.push(`Show total ${numericColumns[0]} by ${categoryColumns[0] || 'category'}`);
+      if (timeColumns.length > 0) {
+        queries.push(`Analyze ${numericColumns[0]} trends over time`);
+      }
+    }
+    
+    if (categoryColumns.length > 0) {
+      queries.push(`Compare data across different ${categoryColumns[0]}`);
+    }
+    
+    // Add some general analysis queries
+    queries.push("Show key insights from the data");
+    queries.push("Create a visualization showing relationships between variables");
+    
+    return queries;
   };
 
   const toggleSidebar = () => {
@@ -333,375 +401,173 @@ const ChatPage = () => {
   return (
     <ThemeProvider theme={theme}>
       <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden', bgcolor: 'background.default' }}>
-        {/* Left Sidebar - Conversation History */}
-        <Box sx={{ 
-          width: sidebarOpen ? 260 : 0, 
-          borderRight: '1px solid rgba(0, 0, 0, 0.08)', 
-          p: sidebarOpen ? 2 : 0,
-          bgcolor: 'background.paper',
-          overflow: 'hidden',
-          transition: 'width 0.3s, padding 0.3s',
-          position: 'relative',
-          flexShrink: 0, // Prevent sidebar from shrinking
-          display: 'flex',
-          flexDirection: 'column',
-          boxShadow: 'none',
-          zIndex: 10
-        }}>
-          <Box sx={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'space-between',
-            mb: 2,
-            pb: 2,
-            borderBottom: '1px solid rgba(0, 0, 0, 0.06)'
-          }}>
-            <Typography variant="h6" component="div" sx={{ 
-              fontWeight: 600,
-              color: 'primary.main',
-              letterSpacing: '-0.02em'
-            }}>
-              Data Analysis Assistant
-            </Typography>
-          </Box>
-          
-          <Button 
-            variant="contained" 
-            fullWidth 
-            sx={{ 
-              mb: 3,
-              py: 1,
-              fontWeight: 500,
-              bgcolor: 'primary.main',
-              '&:hover': {
-                bgcolor: 'primary.dark',
-              }
-            }}
-            onClick={handleNewChat}
-            startIcon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 5V19M5 12H19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>}
-          >
-            New Chat
-          </Button>
-          
-          <Box sx={{ flex: 1, overflowY: 'auto' }}>
-            <ChatHistory 
-              conversations={conversationHistory}
-              activeConversation={activeConversation}
-              onSelectConversation={handleSelectConversation}
-            />
-          </Box>
-        </Box>
-        
-        {/* Toggle button for sidebar */}
-        <Box sx={{ 
-          position: 'absolute', 
-          left: sidebarOpen ? 260 : 0, 
-          top: '50%',
-          zIndex: 20,
-          transition: 'left 0.3s',
-          transform: 'translateY(-50%)'
-        }}>
-          <IconButton 
-            onClick={toggleSidebar}
-            sx={{ 
-              bgcolor: 'background.paper', 
-              border: '1px solid rgba(0, 0, 0, 0.08)',
-              '&:hover': { bgcolor: 'background.paper' },
-              width: 28,
-              height: 28
-            }}
-            size="small"
-          >
-            {sidebarOpen ? <ChevronLeftIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
-          </IconButton>
-        </Box>
-        
-        {/* Main Chat Area */}
-        <Box sx={{ 
-          flex: 1, 
-          display: 'flex', 
-          flexDirection: 'column', 
-          height: '100%',
-          width: `calc(100% - ${sidebarOpen ? 260 : 0}px)`, // Adjust width based on sidebar state
-          marginLeft: sidebarOpen ? 0 : '40px', // Add margin when sidebar is collapsed to account for toggle button
-          transition: 'width 0.3s, margin-left 0.3s',
-          position: 'relative' // Ensure proper positioning of children
-        }}>
-          {/* Dataset Selector - Hidden but still functional */}
-          <Box sx={{ 
-            position: 'absolute', 
-            top: 16, 
-            right: 16, 
-            zIndex: 5, 
-            p: 1.5,
-            display: 'flex',
-            alignItems: 'center',
-            bgcolor: 'background.paper',
-            borderRadius: 1,
-            border: '1px solid rgba(0, 0, 0, 0.08)',
-          }}>
-            <Typography variant="body2" sx={{ mr: 2, fontWeight: 'medium', color: 'text.secondary' }}>
-              {selectedDataset ? (
-                <>
-                  <span style={{ fontWeight: 'bold', color: 'text.primary' }}>Dataset:</span> {selectedDataset.name}
-                </>
-              ) : (
-                'No dataset selected'
-              )}
-            </Typography>
+        {/* Sidebar */}
+        <Box
+          sx={{
+            width: sidebarOpen ? 300 : 0,
+            flexShrink: 0,
+            transition: 'width 0.2s',
+            overflow: 'hidden',
+            borderRight: '1px solid rgba(0, 0, 0, 0.12)',
+            bgcolor: 'background.paper'
+          }}
+        >
+          {/* Dataset Selection Button */}
+          <Box sx={{ p: 2 }}>
             <Button
+              fullWidth
               variant="outlined"
-              size="small"
+              onClick={() => setDatasetDialogOpen(true)}
+              startIcon={<AttachFileIcon />}
               sx={{
-                borderColor: 'primary.main',
-                color: 'primary.main',
+                justifyContent: 'flex-start',
+                mb: 2,
+                borderColor: 'rgba(0, 0, 0, 0.12)',
                 '&:hover': {
-                  borderColor: 'primary.dark',
-                  bgcolor: 'rgba(37, 99, 235, 0.04)',
-                },
-                textTransform: 'none',
-                fontWeight: 500,
-                fontSize: '0.75rem',
-              }}
-              onClick={() => {
-                // Open a dialog to select dataset
-                const datasetDialog = document.createElement('div');
-                datasetDialog.style.position = 'fixed';
-                datasetDialog.style.top = '0';
-                datasetDialog.style.left = '0';
-                datasetDialog.style.width = '100%';
-                datasetDialog.style.height = '100%';
-                datasetDialog.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-                datasetDialog.style.display = 'flex';
-                datasetDialog.style.alignItems = 'center';
-                datasetDialog.style.justifyContent = 'center';
-                datasetDialog.style.zIndex = '9999';
-                
-                const root = ReactDOM.createRoot(datasetDialog);
-                
-                root.render(
-                  <ThemeProvider theme={theme}>
-                    <Box sx={{ 
-                      width: '600px',
-                      maxWidth: '90vw',
-                      maxHeight: '80vh',
-                      bgcolor: 'background.paper',
-                      borderRadius: 2,
-                      border: '1px solid rgba(0, 0, 0, 0.12)',
-                      overflow: 'hidden',
-                      animation: 'fadeIn 0.2s ease-out',
-                      '@keyframes fadeIn': {
-                        '0%': {
-                          opacity: 0,
-                          transform: 'translateY(10px)'
-                        },
-                        '100%': {
-                          opacity: 1,
-                          transform: 'translateY(0)'
-                        }
-                      }
-                    }}>
-                      <Box sx={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center', 
-                        p: 2,
-                        borderBottom: '1px solid rgba(0, 0, 0, 0.06)'
-                      }}>
-                        <Typography variant="h6" sx={{ fontWeight: 600 }}>Select Dataset</Typography>
-                        <IconButton onClick={() => {
-                          document.body.removeChild(datasetDialog);
-                        }}>
-                          <CloseIcon />
-                        </IconButton>
-                      </Box>
-                      <Box sx={{ p: 2, overflowY: 'auto' }}>
-                        <DatasetSelector onDatasetSelect={(name, info) => {
-                          handleDatasetSelect(name, info);
-                          document.body.removeChild(datasetDialog);
-                        }} />
-                      </Box>
-                    </Box>
-                  </ThemeProvider>
-                );
-                
-                document.body.appendChild(datasetDialog);
-              }}
-            >
-              Change Dataset
-            </Button>
-          </Box>
-          
-          {/* Chat Messages Area */}
-          <Box sx={{ 
-            flex: 1, 
-            overflowY: 'auto', 
-            p: 3, 
-            pt: 8, // Add padding to top to account for dataset selector
-            display: 'flex',
-            flexDirection: 'column',
-          }}>
-            {messages.length === 0 ? (
-              <Box sx={{ 
-                display: 'flex', 
-                flexDirection: 'column', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
-                height: '100%',
-                textAlign: 'center',
-                px: 2
-              }}>
-                <Box sx={{ 
-                  width: 64, 
-                  height: 64, 
-                  borderRadius: '50%', 
-                  bgcolor: 'primary.light', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center',
-                  mb: 3,
-                }}>
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M21 11.5C21.0034 12.8199 20.6951 14.1219 20.1 15.3C19.3944 16.7118 18.3098 17.8992 16.9674 18.7293C15.6251 19.5594 14.0782 19.9994 12.5 20C11.1801 20.0035 9.87812 19.6951 8.7 19.1L3 21L4.9 15.3C4.30493 14.1219 3.99656 12.8199 4 11.5C4.00061 9.92179 4.44061 8.37488 5.27072 7.03258C6.10083 5.69028 7.28825 4.6056 8.7 3.90003C9.87812 3.30496 11.1801 2.99659 12.5 3.00003H13C15.0843 3.11502 17.053 3.99479 18.5291 5.47089C20.0052 6.94699 20.885 8.91568 21 11V11.5Z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </Box>
-                <Typography variant="h4" sx={{ mb: 2, fontWeight: 600, color: 'text.primary' }}>
-                  Welcome to IntelliAssistant
-                </Typography>
-                <Typography variant="body1" sx={{ mb: 4, maxWidth: 600, color: 'text.secondary' }}>
-                  Select a dataset and ask me anything about your data! I can help you analyze trends, visualize information, and extract insights.
-                </Typography>
-                
-                <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600, color: 'text.primary' }}>
-                  Try these example queries:
-                </Typography>
-                
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 1 }}>
-                  <Button 
-                    variant="outlined" 
-                    size="medium"
-                    onClick={() => handleSuggestedQuery("Summarize this dataset. Please include a visualization of the results.")}
-                    sx={{ 
-                      borderColor: 'rgba(0, 0, 0, 0.12)', 
-                      color: 'text.primary',
-                      '&:hover': {
-                        borderColor: 'primary.main',
-                        bgcolor: 'rgba(37, 99, 235, 0.04)',
-                      }
-                    }}
-                  >
-                    Summarize this dataset
-                  </Button>
-                  <Button 
-                    variant="outlined" 
-                    size="medium"
-                    onClick={() => handleSuggestedQuery("What are the top 5 trends in this data?")}
-                    sx={{ 
-                      borderColor: 'rgba(0, 0, 0, 0.12)', 
-                      color: 'text.primary',
-                      '&:hover': {
-                        borderColor: 'primary.main',
-                        bgcolor: 'rgba(37, 99, 235, 0.04)',
-                      }
-                    }}
-                  >
-                    Top 5 trends
-                  </Button>
-                  <Button 
-                    variant="outlined" 
-                    size="medium"
-                    onClick={() => handleSuggestedQuery("Create a visualization showing the relationship between key variables.")}
-                    sx={{ 
-                      borderColor: 'rgba(0, 0, 0, 0.12)', 
-                      color: 'text.primary',
-                      '&:hover': {
-                        borderColor: 'primary.main',
-                        bgcolor: 'rgba(37, 99, 235, 0.04)',
-                      }
-                    }}
-                  >
-                    Visualize relationships
-                  </Button>
-                </Box>
-              </Box>
-            ) : (
-              messages.map((message, index) => (
-                <ChatMessage 
-                  key={index} 
-                  message={message} 
-                  isLoading={index === messages.length - 1 && isLoading} 
-                />
-              ))
-            )}
-            <div ref={messagesEndRef} />
-          </Box>
-          
-          {/* Message Input */}
-          <Box sx={{ 
-            p: 2, 
-            borderTop: '1px solid rgba(0, 0, 0, 0.08)', 
-            bgcolor: 'background.paper',
-            width: '100%',
-            boxSizing: 'border-box'
-          }}>
-            <Paper
-              elevation={0}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                p: 1,
-                pl: 2,
-                borderRadius: 2,
-                border: '1px solid rgba(0, 0, 0, 0.1)',
-                '&:focus-within': {
                   borderColor: 'primary.main',
-                  boxShadow: '0 0 0 2px rgba(37, 99, 235, 0.15)'
+                  bgcolor: 'rgba(37, 99, 235, 0.08)'
                 }
               }}
             >
-              <TextField
-                fullWidth
-                variant="standard"
-                placeholder={selectedDataset ? "Ask me about your data..." : "Select a dataset to get started"}
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                disabled={!selectedDataset || isLoading}
-                InputProps={{
-                  disableUnderline: true,
-                }}
-                sx={{
-                  '& .MuiInputBase-input': {
-                    py: 1,
-                  }
-                }}
-              />
-              <IconButton 
-                color="primary"
-                onClick={handleSendMessage}
-                disabled={!inputValue.trim() || !selectedDataset || isLoading}
-                sx={{
-                  bgcolor: inputValue.trim() && selectedDataset && !isLoading ? 'primary.main' : 'action.disabledBackground',
-                  color: inputValue.trim() && selectedDataset && !isLoading ? 'white' : 'text.disabled',
-                  '&:hover': {
-                    bgcolor: inputValue.trim() && selectedDataset && !isLoading ? 'primary.dark' : 'action.disabledBackground',
-                  },
-                  '&.Mui-disabled': {
-                    bgcolor: 'action.disabledBackground',
-                    color: 'text.disabled',
-                  },
-                  width: 36,
-                  height: 36,
-                  mr: 0.5
-                }}
-              >
-                <SendIcon fontSize="small" />
+              {selectedDataset ? `Dataset: ${selectedDataset.name}` : 'Select Dataset'}
+            </Button>
+          </Box>
+          
+          {/* Rest of the sidebar content */}
+          <ChatHistory 
+            conversations={conversationHistory}
+            activeConversation={activeConversation}
+            onConversationSelect={handleConversationSelect}
+          />
+        </Box>
+
+        {/* Main chat area */}
+        <Box sx={{ flexGrow: 1, height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {/* Chat header */}
+          <Box sx={{ 
+            p: 2, 
+            borderBottom: '1px solid rgba(0, 0, 0, 0.12)', 
+            bgcolor: 'background.paper',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+          }}>
+            <Typography variant="h6" component="div">
+              {activeConversation ? activeConversation.title : 'New Chat'}
+            </Typography>
+            <Box>
+              <IconButton onClick={toggleSidebar} size="small">
+                {sidebarOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
               </IconButton>
-            </Paper>
+            </Box>
+          </Box>
+
+          {/* Messages area */}
+          <Box sx={{ 
+            flexGrow: 1, 
+            overflowY: 'auto',
+            p: 2,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2
+          }}>
+            {messages.map((message) => (
+              <ChatMessage
+                key={message.id}
+                message={message}
+                isLoading={message.isLoading}
+              />
+            ))}
+            <div ref={messagesEndRef} />
+          </Box>
+
+          {/* Suggested queries */}
+          {suggestedQueries.length > 0 && messages.length === 0 && (
+            <Box sx={{ p: 2, borderTop: '1px solid rgba(0, 0, 0, 0.12)' }}>
+              <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary' }}>
+                Suggested queries:
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {suggestedQueries.map((query, index) => (
+                  <Button
+                    key={index}
+                    variant="outlined"
+                    size="small"
+                    onClick={() => {
+                      setInputValue(query);
+                      handleSendMessage(query);
+                    }}
+                    sx={{
+                      borderColor: 'rgba(0, 0, 0, 0.12)',
+                      color: 'text.primary',
+                      '&:hover': {
+                        borderColor: 'primary.main',
+                        bgcolor: 'rgba(37, 99, 235, 0.08)'
+                      }
+                    }}
+                  >
+                    {query}
+                  </Button>
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          {/* Input area */}
+          <Box sx={{ 
+            p: 2, 
+            borderTop: '1px solid rgba(0, 0, 0, 0.12)', 
+            bgcolor: 'background.paper'
+          }}>
+            <ChatInput
+              onSendMessage={handleSendMessage}
+              disabled={isLoading}
+              placeholder="Ask a question about your data..."
+            />
           </Box>
         </Box>
+
+        {/* Dataset Selection Dialog */}
+        <Dialog
+          open={datasetDialogOpen}
+          onClose={() => setDatasetDialogOpen(false)}
+          maxWidth="md"
+          fullWidth
+          sx={{
+            '& .MuiDialog-paper': {
+              borderRadius: 2,
+              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+            }
+          }}
+        >
+          <DialogTitle sx={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
+            pb: 2
+          }}>
+            <Typography variant="h6" component="div">
+              Select Dataset
+            </Typography>
+            <IconButton
+              aria-label="close"
+              onClick={() => setDatasetDialogOpen(false)}
+              sx={{
+                color: 'text.secondary',
+                '&:hover': {
+                  color: 'text.primary',
+                  bgcolor: 'rgba(0, 0, 0, 0.04)'
+                }
+              }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent sx={{ pt: 2 }}>
+            <DatasetSelector onDatasetSelect={handleDatasetSelect} />
+          </DialogContent>
+        </Dialog>
       </Box>
     </ThemeProvider>
   );

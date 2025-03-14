@@ -1,0 +1,114 @@
+{
+  "MSFT": {
+    "columns": [
+      "date",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "preview": [
+      {
+        "close": 378.77,
+        "date": "2025-03-13 00:00:00",
+        "high": 385.32,
+        "low": 377.45,
+        "open": 383.155,
+        "volume": 20473017
+      },
+      {
+        "close": 383.27,
+        "date": "2025-03-12 00:00:00",
+        "high": 385.2165,
+        "low": 378.9507,
+        "open": 382.95,
+        "volume": 24253567
+      },
+      {
+        "close": 380.45,
+        "date": "2025-03-11 00:00:00",
+        "high": 386.0,
+        "low": 376.91,
+        "open": 379.0,
+        "volume": 30380177
+      },
+      {
+        "close": 380.16,
+        "date": "2025-03-10 00:00:00",
+        "high": 386.4,
+        "low": 377.22,
+        "open": 385.84,
+        "volume": 32569768
+      },
+      {
+        "close": 393.31,
+        "date": "2025-03-07 00:00:00",
+        "high": 394.8,
+        "low": 385.54,
+        "open": 392.32,
+        "volume": 22034087
+      }
+    ],
+    "shape": {
+      "columns": 6,
+      "rows": 100
+    }
+  },
+  "sales_data": {
+    "columns": [
+      "date",
+      "country",
+      "product",
+      "amount",
+      "units",
+      "customer"
+    ],
+    "preview": [
+      {
+        "amount": 100,
+        "country": "USA",
+        "customer": "Customer 1",
+        "date": "2024-01-01 00:00:00",
+        "product": "Widget A",
+        "units": 1
+      },
+      {
+        "amount": 200,
+        "country": "UK",
+        "customer": "Customer 2",
+        "date": "2024-01-02 00:00:00",
+        "product": "Widget B",
+        "units": 2
+      },
+      {
+        "amount": 300,
+        "country": "Canada",
+        "customer": "Customer 3",
+        "date": "2024-01-03 00:00:00",
+        "product": "Widget C",
+        "units": 3
+      },
+      {
+        "amount": 100,
+        "country": "USA",
+        "customer": "Customer 1",
+        "date": "2024-01-01 00:00:00",
+        "product": "Widget A",
+        "units": 1
+      },
+      {
+        "amount": 200,
+        "country": "UK",
+        "customer": "Customer 2",
+        "date": "2024-01-02 00:00:00",
+        "product": "Widget B",
+        "units": 2
+      }
+    ],
+    "shape": {
+      "columns": 6,
+      "rows": 21
+    }
+  }
+}
