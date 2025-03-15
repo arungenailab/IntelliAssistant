@@ -1,163 +1,210 @@
-import React, { useState } from 'react';
-import { Box, Paper, Typography, Tabs, Tab, IconButton, Tooltip } from '@mui/material';
+import React from 'react';
+import { Box, Typography, IconButton, Tooltip, useTheme } from '@mui/material';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CodeBlock from './ui/CodeBlock';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import AnalysisResult from './AnalysisResult';
 
 /**
- * A component for visualizing SQL queries and their results
- * @param {string} query - The SQL query to display
- * @param {object} results - The results of the query
- * @param {object} visualization - The visualization data
+ * A component that visualizes SQL queries with syntax highlighting and a clean modern design
+ * @param {string} query - The SQL query to visualize
+ * @param {object} results - Optional query results
+ * @param {object} visualization - Optional visualization data
  * @returns {JSX.Element}
  */
 const SQLQueryVisualizer = ({ query, results, visualization }) => {
-  const [activeTab, setActiveTab] = useState(0);
-  const [expanded, setExpanded] = useState(false);
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
   
-  // Format the query with proper indentation if needed
-  const formattedQuery = query;
-  
-  const handleTabChange = (event, newValue) => {
-    setActiveTab(newValue);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(query)
+      .then(() => {
+        console.log('SQL query copied to clipboard');
+      })
+      .catch(err => {
+        console.error('Failed to copy: ', err);
+      });
   };
   
-  const toggleExpanded = () => {
-    setExpanded(prev => !prev);
-  };
+  const formattedQuery = formatSQLQuery(query);
   
   return (
-    <Paper 
-      elevation={1}
-      sx={{ 
-        borderRadius: '8px',
+    <Box
+      sx={{
+        borderRadius: theme.shape.borderRadius,
+        border: `1px solid ${theme.palette.divider}`,
         overflow: 'hidden',
         mb: 2,
-        border: '1px solid rgba(0, 0, 0, 0.08)',
-        transition: 'all 0.3s ease',
+        mt: 2,
+        bgcolor: theme.palette.background.paper,
       }}
     >
-      <Box sx={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center',
-        px: 2,
-        py: 1,
-        borderBottom: '1px solid rgba(0, 0, 0, 0.08)',
-        bgcolor: 'background.default'
-      }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'text.secondary' }}>
-          SQL Query
-        </Typography>
-        
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Tooltip title="Execute Query">
-            <IconButton size="small" color="primary" sx={{ mr: 1 }}>
-              <PlayArrowIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          
-          <Tooltip title={expanded ? "Collapse" : "Expand"}>
-            <IconButton size="small" onClick={toggleExpanded}>
-              {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-            </IconButton>
-          </Tooltip>
-        </Box>
-      </Box>
-      
-      <Box sx={{ maxHeight: expanded ? '600px' : '200px', transition: 'max-height 0.3s ease', overflow: 'hidden' }}>
-        <Tabs 
-          value={activeTab}
-          onChange={handleTabChange}
-          sx={{ 
-            borderBottom: 1, 
-            borderColor: 'divider',
-            minHeight: '36px',
-            '& .MuiTab-root': {
-              minHeight: '36px',
-              py: 0.5
-            }
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          px: 2,
+          py: 1.5,
+          borderBottom: `1px solid ${theme.palette.divider}`,
+          bgcolor: isDarkMode ? 'rgba(25, 118, 210, 0.08)' : 'rgba(25, 118, 210, 0.04)',
+        }}
+      >
+        <Typography
+          variant="subtitle2"
+          sx={{
+            fontWeight: 500,
+            fontSize: '0.875rem',
+            display: 'flex',
+            alignItems: 'center',
+            color: theme.palette.primary.main,
           }}
         >
-          <Tab label="Query" />
-          {results && <Tab label="Results" />}
-          {visualization && <Tab label="Visualization" />}
-        </Tabs>
-        
-        {/* Query Panel */}
-        {activeTab === 0 && (
-          <Box sx={{ p: 0 }}>
-            <CodeBlock 
-              language="sql" 
-              code={formattedQuery} 
-              showLineNumbers={true}
-            />
+          SQL Query
+          <Box 
+            component="span" 
+            sx={{ 
+              ml: 1,
+              px: 1,
+              py: 0.25,
+              borderRadius: theme.shape.borderRadius,
+              fontSize: '0.675rem',
+              fontWeight: 500,
+              bgcolor: theme.palette.primary.main,
+              color: 'white',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+            }}
+          >
+            Executed
           </Box>
-        )}
+        </Typography>
         
-        {/* Results Panel */}
-        {activeTab === 1 && results && (
-          <Box sx={{ p: 2, overflowX: 'auto' }}>
-            {Array.isArray(results) ? (
-              <Box component="table" sx={{ 
-                width: '100%', 
-                borderCollapse: 'collapse',
-                '& th, & td': {
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  padding: '8px 12px',
-                  textAlign: 'left',
-                },
-                '& th': {
-                  backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                  fontWeight: 600,
-                },
-                '& tr:nth-of-type(even)': {
-                  backgroundColor: 'rgba(0, 0, 0, 0.02)',
-                }
-              }}>
-                {/* Table headers */}
-                {results.length > 0 && (
-                  <Box component="thead">
-                    <Box component="tr">
-                      {Object.keys(results[0]).map((key, index) => (
-                        <Box component="th" key={index}>{key}</Box>
-                      ))}
-                    </Box>
-                  </Box>
-                )}
-                
-                {/* Table body */}
-                <Box component="tbody">
-                  {results.map((row, rowIndex) => (
-                    <Box component="tr" key={rowIndex}>
-                      {Object.values(row).map((value, cellIndex) => (
-                        <Box component="td" key={cellIndex}>
-                          {String(value)}
-                        </Box>
-                      ))}
-                    </Box>
-                  ))}
-                </Box>
-              </Box>
-            ) : (
-              <Typography variant="body2" color="text.secondary">
-                No results available.
-              </Typography>
-            )}
-          </Box>
-        )}
-        
-        {/* Visualization Panel */}
-        {activeTab === 2 && visualization && (
-          <Box sx={{ p: 2 }}>
-            <AnalysisResult visualization={visualization} />
-          </Box>
-        )}
+        <Tooltip title="Copy SQL Query">
+          <IconButton
+            size="small"
+            onClick={handleCopy}
+            sx={{
+              color: theme.palette.text.secondary,
+              '&:hover': {
+                color: theme.palette.primary.main,
+              },
+            }}
+          >
+            <ContentCopyIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
       </Box>
-    </Paper>
+      
+      <Box sx={{ p: 0 }}>
+        <CodeBlock 
+          language="sql" 
+          code={formattedQuery} 
+          showLineNumbers={true} 
+        />
+      </Box>
+      
+      {results && (
+        <Box
+          sx={{
+            p: 2,
+            borderTop: `1px solid ${theme.palette.divider}`,
+          }}
+        >
+          <Typography
+            variant="subtitle2"
+            sx={{ fontWeight: 500, mb: 1, color: theme.palette.text.secondary }}
+          >
+            Results:
+          </Typography>
+          <Box
+            sx={{
+              maxHeight: '200px',
+              overflow: 'auto',
+              fontSize: '0.875rem',
+              bgcolor: theme.palette.background.default,
+              border: `1px solid ${theme.palette.divider}`,
+              borderRadius: theme.shape.borderRadius,
+              p: 1.5,
+            }}
+          >
+            <pre
+              style={{
+                margin: 0,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                fontSize: '0.8rem',
+                fontFamily: '"Roboto Mono", monospace',
+                color: theme.palette.text.primary,
+              }}
+            >
+              {typeof results === 'string' ? results : JSON.stringify(results, null, 2)}
+            </pre>
+          </Box>
+        </Box>
+      )}
+      
+      {visualization && (
+        <Box
+          sx={{
+            p: 2,
+            borderTop: `1px solid ${theme.palette.divider}`,
+          }}
+        >
+          <Typography
+            variant="subtitle2"
+            sx={{ fontWeight: 500, mb: 1, color: theme.palette.text.secondary }}
+          >
+            Visualization:
+          </Typography>
+          
+          <Box
+            sx={{
+              width: '100%',
+              minHeight: '300px',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              position: 'relative',
+              bgcolor: theme.palette.background.default,
+              borderRadius: theme.shape.borderRadius,
+              border: `1px solid ${theme.palette.divider}`,
+              p: 2,
+            }}
+          >
+            {/* Visualization content would go here */}
+            <div id="visualization-container"></div>
+          </Box>
+        </Box>
+      )}
+    </Box>
   );
+};
+
+// Helper function to format SQL query for better readability
+const formatSQLQuery = (query) => {
+  if (!query) return '';
+  
+  // Simple SQL formatting - could be replaced with a more sophisticated formatter
+  return query
+    .replace(/\s+/g, ' ')
+    .replace(/\s*,\s*/g, ', ')
+    .replace(/\s*=\s*/g, ' = ')
+    .replace(/\s*>\s*/g, ' > ')
+    .replace(/\s*<\s*/g, ' < ')
+    .replace(/\s*SELECT\s+/ig, 'SELECT\n  ')
+    .replace(/\s*FROM\s+/ig, '\nFROM\n  ')
+    .replace(/\s*WHERE\s+/ig, '\nWHERE\n  ')
+    .replace(/\s*GROUP BY\s+/ig, '\nGROUP BY\n  ')
+    .replace(/\s*HAVING\s+/ig, '\nHAVING\n  ')
+    .replace(/\s*ORDER BY\s+/ig, '\nORDER BY\n  ')
+    .replace(/\s*LIMIT\s+/ig, '\nLIMIT\n  ')
+    .replace(/\s*AND\s+/ig, '\n  AND ')
+    .replace(/\s*OR\s+/ig, '\n  OR ')
+    .replace(/\s*JOIN\s+/ig, '\nJOIN\n  ')
+    .replace(/\s*LEFT JOIN\s+/ig, '\nLEFT JOIN\n  ')
+    .replace(/\s*RIGHT JOIN\s+/ig, '\nRIGHT JOIN\n  ')
+    .replace(/\s*INNER JOIN\s+/ig, '\nINNER JOIN\n  ')
+    .replace(/\s*OUTER JOIN\s+/ig, '\nOUTER JOIN\n  ')
+    .replace(/\s*ON\s+/ig, '\n  ON ');
 };
 
 export default SQLQueryVisualizer; 

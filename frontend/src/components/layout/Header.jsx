@@ -2,6 +2,9 @@ import { Bell, Search } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { useTheme } from "../../contexts/ThemeContext";
+import { Switch, Tooltip, Box, Typography } from "@mui/material";
+import DarkModeIcon from '@mui/icons-material/DarkMode';
+import LightModeIcon from '@mui/icons-material/LightMode';
 
 export default function Header({ title }) {
   const { darkMode, toggleDarkMode } = useTheme();
@@ -20,14 +23,61 @@ export default function Header({ title }) {
           />
         </div>
         
-        <Button 
-          variant="outline" 
-          size="icon" 
-          onClick={toggleDarkMode}
-          className="rounded-full"
-        >
-          {darkMode ? '☀️' : '🌙'}
-        </Button>
+        <Tooltip title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}>
+          <Box 
+            sx={{ 
+              display: 'flex', 
+              alignItems: 'center',
+              bgcolor: darkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+              borderRadius: 2,
+              p: '4px 8px',
+              ml: 1,
+            }}
+          >
+            <LightModeIcon 
+              sx={{ 
+                fontSize: '1.2rem', 
+                color: darkMode ? 'text.disabled' : '#ff9800',
+                mr: 0.5,
+                transition: 'color 0.3s ease',
+              }} 
+            />
+            <Switch
+              checked={darkMode}
+              onChange={toggleDarkMode}
+              color="primary"
+              size="small"
+              inputProps={{ 'aria-label': 'Theme toggle' }}
+              sx={{
+                '& .MuiSwitch-switchBase.Mui-checked': {
+                  color: darkMode ? '#90caf9' : '#1976d2',
+                },
+                '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                  backgroundColor: darkMode ? '#90caf9' : '#1976d2',
+                },
+              }}
+            />
+            <DarkModeIcon 
+              sx={{ 
+                fontSize: '1.2rem', 
+                color: darkMode ? '#90caf9' : 'text.disabled',
+                ml: 0.5,
+                transition: 'color 0.3s ease',
+              }} 
+            />
+            <Typography 
+              variant="caption" 
+              sx={{ 
+                ml: 0.5, 
+                userSelect: 'none',
+                color: 'text.secondary',
+                fontWeight: 500,
+              }}
+            >
+              {darkMode ? 'Dark' : 'Light'}
+            </Typography>
+          </Box>
+        </Tooltip>
         
         <Button variant="ghost" size="icon" className="relative rounded-full">
           <Bell className="h-5 w-5" />

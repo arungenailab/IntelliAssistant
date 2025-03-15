@@ -16,106 +16,100 @@ export const ThemeProvider = ({ children }) => {
 
   // Define font configuration
   const fontFamily = [
-    'Inter',
+    'Roboto',
     'Segoe UI',
-    'Roboto', 
     'Helvetica',
     'Arial',
     'sans-serif',
   ].join(',');
 
-  // Create the MUI theme based on dark mode state
-  const theme = createTheme({
+  // Create the light theme
+  const lightTheme = createTheme({
     palette: {
-      mode: darkMode ? 'dark' : 'light',
-      primary: {
-        // Modern blue from sequel.sh
-        main: '#3366FF',
-        light: '#6C8EFF',
-        dark: '#2952CC',
+      mode: 'light',
+      primary: { 
+        main: '#1976d2',
+        light: '#4791db',
+        dark: '#115293',
         contrastText: '#ffffff',
       },
-      secondary: {
-        // Updated secondary colors
-        main: darkMode ? '#8468F5' : '#7B61FF',
-        light: darkMode ? '#A68BFF' : '#9F8AFF',
-        dark: darkMode ? '#6A4FD9' : '#5E48CC',
+      secondary: { 
+        main: '#757575',
+        light: '#919191',
+        dark: '#5c5c5c',
         contrastText: '#ffffff',
       },
-      background: {
-        default: darkMode ? '#0F0F1A' : '#F8FAFC',
-        paper: darkMode ? '#1A1A2E' : '#FFFFFF',
+      background: { 
+        default: '#ffffff', 
+        paper: '#f5f5f5',
+        chat: '#f8f8f8',
       },
       text: {
-        primary: darkMode ? '#E2E8F0' : '#1E293B',
-        secondary: darkMode ? '#94A3B8' : '#64748B',
+        primary: '#212121',
+        secondary: '#757575',
       },
       success: {
-        main: '#10B981',
-        light: '#34D399',
-        dark: '#059669',
+        main: '#4caf50',
+        light: '#81c784',
+        dark: '#388e3c',
       },
       error: {
-        main: '#EF4444',
-        light: '#F87171',
-        dark: '#DC2626',
+        main: '#f44336',
+        light: '#e57373',
+        dark: '#d32f2f',
       },
       warning: {
-        main: '#F59E0B',
-        light: '#FBBF24',
-        dark: '#D97706',
+        main: '#ff9800',
+        light: '#ffb74d',
+        dark: '#f57c00',
       },
       info: {
-        main: '#3B82F6',
-        light: '#60A5FA',
-        dark: '#2563EB',
+        main: '#2196f3',
+        light: '#64b5f6',
+        dark: '#1976d2',
       },
       grey: {
-        50: '#F8FAFC',
-        100: '#F1F5F9',
-        200: '#E2E8F0',
-        300: '#CBD5E1',
-        400: '#94A3B8',
-        500: '#64748B',
-        600: '#475569',
-        700: '#334155',
-        800: '#1E293B',
-        900: '#0F172A',
+        50: '#fafafa',
+        100: '#f5f5f5',
+        200: '#eeeeee',
+        300: '#e0e0e0',
+        400: '#bdbdbd',
+        500: '#9e9e9e',
+        600: '#757575',
+        700: '#616161',
+        800: '#424242',
+        900: '#212121',
       },
     },
     typography: {
       fontFamily,
       h1: {
-        fontWeight: 700,
+        fontWeight: 500,
         fontSize: '2.5rem',
-        lineHeight: 1.2,
-        letterSpacing: '-0.02em',
+        lineHeight: 1.5,
       },
       h2: {
-        fontWeight: 700,
+        fontWeight: 500,
         fontSize: '2rem',
-        lineHeight: 1.2,
-        letterSpacing: '-0.01em',
+        lineHeight: 1.5,
       },
       h3: {
-        fontWeight: 600,
-        fontSize: '1.5rem',
-        lineHeight: 1.3,
-        letterSpacing: '-0.01em',
+        fontWeight: 500,
+        fontSize: '1.75rem',
+        lineHeight: 1.5,
       },
       h4: {
-        fontWeight: 600,
-        fontSize: '1.25rem',
-        lineHeight: 1.4,
-        letterSpacing: '-0.01em',
+        fontWeight: 500,
+        fontSize: '1.5rem',
+        lineHeight: 1.5,
       },
       h5: {
-        fontWeight: 600,
-        fontSize: '1.125rem',
-        lineHeight: 1.4,
+        fontWeight: 500,
+        fontSize: '1.25rem',
+        lineHeight: 1.5,
       },
       h6: {
-        fontWeight: 600,
+        fontWeight: 500,
         fontSize: '1rem',
         lineHeight: 1.5,
       },
@@ -127,212 +121,213 @@ export const ThemeProvider = ({ children }) => {
       subtitle2: {
         fontSize: '0.875rem',
         fontWeight: 500,
-        lineHeight: 1.57,
+        lineHeight: 1.5,
       },
       body1: {
         fontSize: '1rem',
+        fontWeight: 400,
         lineHeight: 1.5,
       },
       body2: {
         fontSize: '0.875rem',
-        lineHeight: 1.57,
+        fontWeight: 400,
+        lineHeight: 1.5,
       },
       button: {
-        fontWeight: 600,
+        fontWeight: 500,
         fontSize: '0.875rem',
         textTransform: 'none',
-        letterSpacing: '0.02em',
+        lineHeight: 1.5,
       },
       caption: {
         fontSize: '0.75rem',
-        lineHeight: 1.66,
+        fontWeight: 400,
+        lineHeight: 1.5,
       },
       overline: {
-        fontWeight: 600,
+        fontWeight: 400,
         fontSize: '0.75rem',
         textTransform: 'uppercase',
-        letterSpacing: '0.08em',
+        lineHeight: 1.5,
       },
     },
     shape: {
-      borderRadius: 8,
-    },
-    shadows: [
-      'none',
-      '0px 2px 4px rgba(0, 0, 0, 0.05)',
-      '0px 4px 6px rgba(0, 0, 0, 0.07)',
-      '0px 6px 12px rgba(0, 0, 0, 0.08)',
-      '0px 8px 16px rgba(0, 0, 0, 0.09)',
-      '0px 12px 24px rgba(0, 0, 0, 0.11)',
-      // ... keep the rest of the shadows as default
-    ],
-    components: {
-      MuiCssBaseline: {
-        styleOverrides: {
-          body: {
-            scrollbarWidth: 'thin',
-            '&::-webkit-scrollbar': {
-              width: '6px',
-              height: '6px',
-            },
-            '&::-webkit-scrollbar-thumb': {
-              backgroundColor: darkMode ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.2)',
-              borderRadius: '3px',
-            },
-            '&::-webkit-scrollbar-track': {
-              backgroundColor: 'transparent',
-            },
-          },
-        },
-      },
-      MuiButton: {
-        styleOverrides: {
-          root: {
-            borderRadius: 8,
-            boxShadow: 'none',
-            padding: '8px 16px',
-            fontWeight: 600,
-            '&:hover': {
-              boxShadow: 'none',
-              transform: 'translateY(-1px)',
-              transition: 'transform 0.2s ease-in-out',
-            },
-          },
-          contained: {
-            '&:hover': {
-              boxShadow: 'none',
-            },
-          },
-          containedPrimary: {
-            background: 'linear-gradient(90deg, #3366FF 0%, #5E48CC 100%)',
-            '&:hover': {
-              background: 'linear-gradient(90deg, #2952CC 0%, #4C39A8 100%)',
-            },
-          },
-        },
-      },
-      MuiPaper: {
-        styleOverrides: {
-          root: {
-            borderRadius: 12,
-            boxShadow: 'none',
-            border: `1px solid ${darkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)'}`,
-          },
-          elevation1: {
-            boxShadow: darkMode 
-              ? '0px 4px 8px rgba(0, 0, 0, 0.5)' 
-              : '0px 2px 4px rgba(0, 0, 0, 0.05), 0px 4px 6px rgba(0, 0, 0, 0.03)',
-            border: `1px solid ${darkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.03)'}`,
-          },
-          elevation3: {
-            boxShadow: darkMode 
-              ? '0px 8px 16px rgba(0, 0, 0, 0.6)' 
-              : '0px 4px 8px rgba(0, 0, 0, 0.06), 0px 8px 16px rgba(0, 0, 0, 0.04)',
-            border: `1px solid ${darkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'}`,
-          },
-        },
-      },
-      MuiCard: {
-        styleOverrides: {
-          root: {
-            borderRadius: 12,
-            overflow: 'hidden', 
-            transition: 'all 0.2s ease-in-out',
-            '&:hover': {
-              transform: 'translateY(-3px)',
-              boxShadow: darkMode 
-                ? '0px 8px 20px rgba(0, 0, 0, 0.6)' 
-                : '0px 8px 20px rgba(0, 0, 0, 0.08)',
-            },
-          },
-        },
-      },
-      MuiTextField: {
-        styleOverrides: {
-          root: {
-            '& .MuiOutlinedInput-root': {
-              borderRadius: 8,
-              transition: 'border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
-              '&.Mui-focused': {
-                boxShadow: `0 0 0 3px ${darkMode ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.15)'}`,
-              },
-            },
-          },
-        },
-      },
-      MuiIconButton: {
-        styleOverrides: {
-          root: {
-            borderRadius: 8,
-            transition: 'background-color 0.2s ease-in-out, transform 0.2s ease-in-out',
-            '&:hover': {
-              backgroundColor: darkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(51, 102, 255, 0.08)',
-              transform: 'translateY(-1px)',
-            },
-          },
-        },
-      },
-      MuiInputBase: {
-        styleOverrides: {
-          root: {
-            fontSize: '0.9375rem',
-          },
-        },
-      },
-      MuiMenuItem: {
-        styleOverrides: {
-          root: {
-            fontSize: '0.9375rem',
-            minHeight: 42,
-          },
-        },
-      },
-      MuiListItemButton: {
-        styleOverrides: {
-          root: {
-            borderRadius: 8,
-            '&.Mui-selected': {
-              backgroundColor: darkMode ? 'rgba(99, 102, 241, 0.16)' : 'rgba(99, 102, 241, 0.08)',
-              '&:hover': {
-                backgroundColor: darkMode ? 'rgba(99, 102, 241, 0.24)' : 'rgba(99, 102, 241, 0.16)',
-              },
-            },
-          },
-        },
-      },
+      borderRadius: 4,
     },
   });
 
-  // Listen for changes to the 'dark' class on the document element
-  useEffect(() => {
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        if (mutation.attributeName === 'class') {
-          setDarkMode(document.documentElement.classList.contains('dark'));
-        }
-      });
-    });
+  // Create the dark theme
+  const darkTheme = createTheme({
+    palette: {
+      mode: 'dark',
+      primary: { 
+        main: '#90caf9',
+        light: '#b3d9ff',
+        dark: '#648dae',
+        contrastText: '#121212',
+      },
+      secondary: { 
+        main: '#bdbdbd',
+        light: '#e6e6e6',
+        dark: '#8d8d8d',
+        contrastText: '#121212',
+      },
+      background: { 
+        default: '#121212', 
+        paper: '#1d1d1d',
+        chat: '#1e1e1e',
+      },
+      text: {
+        primary: '#ffffff',
+        secondary: '#b0b0b0',
+      },
+      success: {
+        main: '#6fba6f',
+        light: '#98d598',
+        dark: '#4a934a',
+      },
+      error: {
+        main: '#f77066',
+        light: '#ff9c91',
+        dark: '#d32f2f',
+      },
+      warning: {
+        main: '#ffb74d',
+        light: '#ffc77d',
+        dark: '#c68a00',
+      },
+      info: {
+        main: '#64b5f6',
+        light: '#8dcbfa',
+        dark: '#4387c7',
+      },
+      grey: lightTheme.palette.grey,
+    },
+    typography: lightTheme.typography,
+    shape: lightTheme.shape,
+  });
 
-    observer.observe(document.documentElement, { attributes: true });
+  // Select the appropriate theme based on dark mode state
+  const theme = darkMode ? darkTheme : lightTheme;
 
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
-
-  // Toggle dark mode function
+  // Add component customizations to the theme
+  theme.components = {
+    MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          scrollbarWidth: 'thin',
+          '&::-webkit-scrollbar': {
+            width: '6px',
+            height: '6px',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: darkMode ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)',
+            borderRadius: '3px',
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: 'transparent',
+          },
+        },
+      },
+    },
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          borderRadius: 4,
+          boxShadow: 'none',
+          padding: '6px 16px',
+          fontWeight: 500,
+          textTransform: 'none',
+          '&:hover': {
+            boxShadow: 'none',
+          },
+        },
+        contained: {
+          boxShadow: '0px 1px 5px rgba(0, 0, 0, 0.2)',
+          '&:hover': {
+            boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.25)',
+          },
+        },
+      },
+    },
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+          borderRadius: 4,
+          boxShadow: 'none',
+        },
+        elevation1: {
+          boxShadow: darkMode 
+            ? '0px 2px 4px rgba(0, 0, 0, 0.5)' 
+            : '0px 1px 3px rgba(0, 0, 0, 0.12), 0px 1px 2px rgba(0, 0, 0, 0.24)',
+        },
+        elevation2: {
+          boxShadow: darkMode 
+            ? '0px 4px 5px rgba(0, 0, 0, 0.5)' 
+            : '0px 3px 6px rgba(0, 0, 0, 0.15), 0px 2px 4px rgba(0, 0, 0, 0.12)',
+        },
+      },
+    },
+    MuiAppBar: {
+      styleOverrides: {
+        root: {
+          boxShadow: darkMode 
+            ? '0px 2px 4px rgba(0, 0, 0, 0.5)' 
+            : '0px 1px 3px rgba(0, 0, 0, 0.12), 0px 1px 2px rgba(0, 0, 0, 0.24)',
+        },
+      },
+    },
+    MuiTextField: {
+      styleOverrides: {
+        root: {
+          '& .MuiOutlinedInput-root': {
+            borderRadius: 4,
+          },
+        },
+      },
+    },
+    MuiCard: {
+      styleOverrides: {
+        root: {
+          borderRadius: 4,
+          overflow: 'hidden',
+          boxShadow: darkMode 
+            ? '0px 2px 4px rgba(0, 0, 0, 0.5)' 
+            : '0px 1px 3px rgba(0, 0, 0, 0.12), 0px 1px 2px rgba(0, 0, 0, 0.24)',
+        },
+      },
+    },
+    MuiSwitch: {
+      styleOverrides: {
+        root: {
+          padding: 8,
+          '& .MuiSwitch-track': {
+            borderRadius: 22 / 2,
+          },
+          '& .MuiSwitch-thumb': {
+            boxShadow: 'none',
+          },
+        },
+      },
+    },
+  };
+  
+  // Toggle dark mode
   const toggleDarkMode = () => {
-    const newDarkMode = !darkMode;
-    if (newDarkMode) {
+    setDarkMode(!darkMode);
+  };
+  
+  // Effect to sync dark mode with HTML class (for potential CSS styling)
+  useEffect(() => {
+    if (darkMode) {
       document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
+      document.documentElement.style.colorScheme = 'dark';
     } else {
       document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
+      document.documentElement.style.colorScheme = 'light';
     }
-    setDarkMode(newDarkMode);
-  };
-
+  }, [darkMode]);
+  
   return (
     <ThemeContext.Provider value={{ darkMode, toggleDarkMode }}>
       <MuiThemeProvider theme={theme}>

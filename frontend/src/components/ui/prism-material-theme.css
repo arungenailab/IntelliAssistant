@@ -1,0 +1,264 @@
+/**
+ * Material Design inspired theme for PrismJS
+ * Supports both light and dark modes automatically based on theme
+ */
+
+:root {
+  --prism-font-family: 'Roboto Mono', monospace;
+  --prism-font-size: 0.9rem;
+  --prism-line-height: 1.5;
+  
+  /* Light mode colors */
+  --prism-light-background: rgba(245, 245, 245, 0.95);
+  --prism-light-text: #24292e;
+  --prism-light-comment: #6a737d;
+  --prism-light-punctuation: #24292e;
+  --prism-light-keyword: #d73a49;
+  --prism-light-function: #6f42c1;
+  --prism-light-string: #22863a;
+  --prism-light-number: #005cc5;
+  --prism-light-builtin: #e36209;
+  --prism-light-class: #6f42c1;
+  --prism-light-property: #005cc5;
+  --prism-light-namespace: #6f42c1;
+  --prism-light-variable: #24292e;
+  --prism-light-operator: #d73a49;
+  --prism-light-regex: #22863a;
+  
+  /* Dark mode colors */
+  --prism-dark-background: rgba(30, 30, 30, 0.95);
+  --prism-dark-text: #e1e4e8;
+  --prism-dark-comment: #6a737d;
+  --prism-dark-punctuation: #e1e4e8;
+  --prism-dark-keyword: #f97583;
+  --prism-dark-function: #b392f0;
+  --prism-dark-string: #9ecbff;
+  --prism-dark-number: #79b8ff;
+  --prism-dark-builtin: #ffab70;
+  --prism-dark-class: #b392f0;
+  --prism-dark-property: #79b8ff;
+  --prism-dark-namespace: #b392f0;
+  --prism-dark-variable: #e1e4e8;
+  --prism-dark-operator: #f97583;
+  --prism-dark-regex: #9ecbff;
+}
+
+/* Base code styles */
+.token-line,
+pre[class*="language-"],
+code[class*="language-"] {
+  font-family: var(--prism-font-family);
+  font-size: var(--prism-font-size);
+  line-height: var(--prism-line-height);
+  direction: ltr;
+  text-align: left;
+  white-space: pre;
+  word-spacing: normal;
+  word-break: normal;
+  tab-size: 2;
+  hyphens: none;
+}
+
+/* Adapt colors to theme */
+html:not(.dark) .token-line,
+html:not(.dark) pre[class*="language-"],
+html:not(.dark) code[class*="language-"] {
+  color: var(--prism-light-text);
+  background: var(--prism-light-background);
+}
+
+html.dark .token-line,
+html.dark pre[class*="language-"],
+html.dark code[class*="language-"] {
+  color: var(--prism-dark-text);
+  background: var(--prism-dark-background);
+}
+
+/* Token styles - Light theme */
+html:not(.dark) .token.comment,
+html:not(.dark) .token.prolog,
+html:not(.dark) .token.doctype,
+html:not(.dark) .token.cdata {
+  color: var(--prism-light-comment);
+  font-style: italic;
+}
+
+html:not(.dark) .token.punctuation {
+  color: var(--prism-light-punctuation);
+}
+
+html:not(.dark) .token.namespace {
+  color: var(--prism-light-namespace);
+}
+
+html:not(.dark) .token.property,
+html:not(.dark) .token.tag,
+html:not(.dark) .token.boolean,
+html:not(.dark) .token.constant,
+html:not(.dark) .token.symbol {
+  color: var(--prism-light-property);
+}
+
+html:not(.dark) .token.number,
+html:not(.dark) .token.selector,
+html:not(.dark) .token.attr-name,
+html:not(.dark) .token.string,
+html:not(.dark) .token.char,
+html:not(.dark) .token.builtin {
+  color: var(--prism-light-string);
+}
+
+html:not(.dark) .token.deleted {
+  color: #f92672;
+}
+
+html:not(.dark) .token.inserted {
+  color: #22863a;
+}
+
+html:not(.dark) .token.operator,
+html:not(.dark) .token.entity,
+html:not(.dark) .token.url,
+html:not(.dark) .language-css .token.string,
+html:not(.dark) .style .token.string {
+  color: var(--prism-light-operator);
+}
+
+html:not(.dark) .token.atrule,
+html:not(.dark) .token.attr-value,
+html:not(.dark) .token.keyword {
+  color: var(--prism-light-keyword);
+}
+
+html:not(.dark) .token.function,
+html:not(.dark) .token.class-name {
+  color: var(--prism-light-function);
+}
+
+html:not(.dark) .token.regex,
+html:not(.dark) .token.important,
+html:not(.dark) .token.variable {
+  color: var(--prism-light-regex);
+}
+
+/* Token styles - Dark theme */
+html.dark .token.comment,
+html.dark .token.prolog,
+html.dark .token.doctype,
+html.dark .token.cdata {
+  color: var(--prism-dark-comment);
+  font-style: italic;
+}
+
+html.dark .token.punctuation {
+  color: var(--prism-dark-punctuation);
+}
+
+html.dark .token.namespace {
+  color: var(--prism-dark-namespace);
+}
+
+html.dark .token.property,
+html.dark .token.tag,
+html.dark .token.boolean,
+html.dark .token.constant,
+html.dark .token.symbol {
+  color: var(--prism-dark-property);
+}
+
+html.dark .token.number,
+html.dark .token.selector,
+html.dark .token.attr-name,
+html.dark .token.string,
+html.dark .token.char,
+html.dark .token.builtin {
+  color: var(--prism-dark-string);
+}
+
+html.dark .token.deleted {
+  color: #f97583;
+}
+
+html.dark .token.inserted {
+  color: #9ecbff;
+}
+
+html.dark .token.operator,
+html.dark .token.entity,
+html.dark .token.url,
+html.dark .language-css .token.string,
+html.dark .style .token.string {
+  color: var(--prism-dark-operator);
+}
+
+html.dark .token.atrule,
+html.dark .token.attr-value,
+html.dark .token.keyword {
+  color: var(--prism-dark-keyword);
+}
+
+html.dark .token.function,
+html.dark .token.class-name {
+  color: var(--prism-dark-function);
+}
+
+html.dark .token.regex,
+html.dark .token.important,
+html.dark .token.variable {
+  color: var(--prism-dark-regex);
+}
+
+/* Other styling */
+.token.important,
+.token.bold {
+  font-weight: bold;
+}
+
+.token.italic {
+  font-style: italic;
+}
+
+.token.entity {
+  cursor: help;
+}
+
+/* Line highlighting */
+pre[data-line] {
+  position: relative;
+}
+
+.line-highlight {
+  position: absolute;
+  left: 0;
+  right: 0;
+  margin-top: 1em;
+  background: rgba(233, 237, 241, 0.3);
+  pointer-events: none;
+  line-height: inherit;
+  white-space: pre;
+}
+
+html.dark .line-highlight {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Code block styling */
+pre[class*="language-"] {
+  margin: 0;
+  overflow: auto;
+  padding: 1em;
+}
+
+/* Inline code */
+:not(pre) > code[class*="language-"] {
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+  white-space: normal;
+  background: rgba(135, 131, 120, 0.15);
+  color: #eb5757;
+}
+
+html.dark :not(pre) > code[class*="language-"] {
+  background: rgba(135, 131, 120, 0.15);
+  color: #ff8a8a;
+} 

@@ -1,25 +1,27 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { 
   Box, 
   TextField, 
   IconButton, 
-  Tooltip, 
-  Paper,
+  CircularProgress,
   InputAdornment,
-  useTheme
+  useTheme 
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
-import AttachFileIcon from '@mui/icons-material/AttachFile';
 import ModelSelector from './ModelSelector';
 
 const ChatInput = ({ 
-  onSendMessage, 
+  message,
+  setMessage,
+  handleSend,
   disabled = false, 
-  placeholder = "Ask about your data..."
+  isLoading = false,
+  placeholder = "Ask IntelliAssistant anything...",
+  selectedModel = 'gemini-2.0-flash',
+  onModelChange = () => {},
+  useCache = true,
+  onCacheToggle = () => {}
 }) => {
-  const [message, setMessage] = useState('');
-  const [selectedModel, setSelectedModel] = useState('gemini-2.0-flash');
-  const [useCache, setUseCache] = useState(true);
   const inputRef = useRef(null);
   const theme = useTheme();
   
@@ -30,116 +32,118 @@ const ChatInput = ({
     }
   }, []);
   
-  const handleSend = () => {
+  const handleSendMessage = () => {
     if (message.trim()) {
-      onSendMessage(message.trim(), selectedModel, useCache);
-      setMessage('');
+      handleSend(message.trim(), selectedModel, useCache);
     }
   };
   
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      handleSendMessage();
     }
   };
   
-  const handleModelChange = (modelId) => {
-    setSelectedModel(modelId);
-  };
-  
-  const handleCacheToggle = (useCache) => {
-    setUseCache(useCache);
-  };
-  
   return (
-    <Paper
-      elevation={3}
+    <Box
       sx={{
-        p: 1.5,
-        borderRadius: 2,
-        background: theme.palette.background.paper,
-        border: `1px solid ${theme.palette.divider}`,
+        width: '100%',
+        maxWidth: '1000px',
+        mx: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 1,
       }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'flex-end' }}>
-        <TextField
-          inputRef={inputRef}
-          fullWidth
-          multiline
-          maxRows={5}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyPress={handleKeyPress}
-          placeholder={placeholder}
-          variant="standard"
-          disabled={disabled}
-          InputProps={{
-            disableUnderline: true,
-            sx: { 
-              fontSize: '1rem',
-              p: 1,
-              '&.Mui-focused': {
-                boxShadow: 'none',
-              }
+      <TextField
+        inputRef={inputRef}
+        fullWidth
+        multiline
+        maxRows={4}
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        onKeyPress={handleKeyPress}
+        placeholder={placeholder}
+        variant="outlined"
+        disabled={disabled || isLoading}
+        sx={{
+          '& .MuiOutlinedInput-root': {
+            backgroundColor: theme.palette.background.paper,
+            borderRadius: 2,
+            boxShadow: theme.palette.mode === 'dark' 
+              ? '0px 1px 4px rgba(0, 0, 0, 0.2)' 
+              : '0px 1px 3px rgba(0, 0, 0, 0.05)',
+            transition: 'all 0.2s',
+            '&.Mui-focused': {
+              boxShadow: `0 0 0 2px ${theme.palette.primary.main}30`,
             },
-            endAdornment: (
-              <InputAdornment position="end">
-                <Tooltip title="Attach file">
-                  <IconButton 
-                    disabled={true}  // Disabled until file upload is implemented
-                    sx={{ opacity: 0.6 }}
-                  >
-                    <AttachFileIcon />
-                  </IconButton>
-                </Tooltip>
-              </InputAdornment>
-            )
+            '&:hover': {
+              borderColor: theme.palette.primary.main,
+            },
+          },
+        }}
+        InputProps={{
+          sx: { 
+            fontSize: '0.95rem',
+            p: 1,
+          },
+          endAdornment: (
+            <InputAdornment position="end">
+              {isLoading ? (
+                <CircularProgress size={24} color="primary" thickness={4} />
+              ) : (
+                <IconButton
+                  onClick={handleSendMessage}
+                  disabled={!message.trim() || disabled}
+                  color="primary"
+                  sx={{
+                    ml: 0.5,
+                    bgcolor: message.trim() 
+                      ? theme.palette.primary.main 
+                      : theme.palette.action.disabledBackground,
+                    color: message.trim() 
+                      ? theme.palette.primary.contrastText 
+                      : theme.palette.text.disabled,
+                    '&:hover': {
+                      bgcolor: message.trim() 
+                        ? theme.palette.primary.dark 
+                        : theme.palette.action.disabledBackground,
+                    },
+                    width: 36,
+                    height: 36,
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <SendIcon fontSize="small" />
+                </IconButton>
+              )}
+            </InputAdornment>
+          ),
+        }}
+      />
+      
+      <Box 
+        sx={{
+          display: 'flex', 
+          justifyContent: 'flex-end',
+          opacity: 0.8,
+          mr: 0.5,
+        }}
+      >
+        <ModelSelector 
+          selectedModel={selectedModel} 
+          onModelChange={onModelChange}
+          useCache={useCache}
+          onCacheToggle={onCacheToggle}
+          sx={{ 
+            '& .MuiFormControl-root': { m: 0 },
+            transform: 'scale(0.9)',
+            transformOrigin: 'right',
           }}
         />
-        <Tooltip title="Send">
-          <IconButton 
-            onClick={handleSend} 
-            disabled={disabled || !message.trim()}
-            color="primary"
-            sx={{ 
-              ml: 1, 
-              bgcolor: message.trim() ? 'primary.main' : 'transparent',
-              color: message.trim() ? 'white' : 'primary.main',
-              '&:hover': {
-                bgcolor: message.trim() ? 'primary.dark' : 'rgba(25, 118, 210, 0.04)',
-              },
-              transition: 'background-color 0.2s',
-            }}
-          >
-            <SendIcon />
-          </IconButton>
-        </Tooltip>
       </Box>
-      
-      <Box sx={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        mt: 1, 
-        px: 1 
-      }}>
-        <ModelSelector
-          selectedModel={selectedModel}
-          useCache={useCache}
-          onModelChange={handleModelChange}
-          onCacheToggle={handleCacheToggle}
-        />
-        
-        <Box sx={{ 
-          fontSize: '0.75rem', 
-          color: 'text.secondary',
-          opacity: 0.7,
-        }}>
-          Powered by Google Gemini
-        </Box>
-      </Box>
-    </Paper>
+    </Box>
   );
 };
 

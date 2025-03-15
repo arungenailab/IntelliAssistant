@@ -1,15 +1,12 @@
-import React, { useState } from 'react';
-import { Box, Typography, IconButton, Divider, CircularProgress, Tooltip } from '@mui/material';
+import React from 'react';
+import { Box, Typography, IconButton, CircularProgress, Tooltip, Fade } from '@mui/material';
 import ThumbUpIcon from '@mui/icons-material/ThumbUp';
 import ThumbDownIcon from '@mui/icons-material/ThumbDown';
-import BookmarkIcon from '@mui/icons-material/Bookmark';
-import ShareIcon from '@mui/icons-material/Share';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import AnalysisResult from './AnalysisResult';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
-import SQLQueryVisualizer from './SQLQueryVisualizer';
 import ChatBubble from './ui/ChatBubble';
 import CodeBlock from './ui/CodeBlock';
+import SQLQueryVisualizer from './SQLQueryVisualizer';
 
 // Helper function to format timestamps
 const formatTimestamp = (timestamp) => {
@@ -73,8 +70,6 @@ const formatSQLQuery = (content) => {
 
 const ChatMessage = ({ message, isLoading }) => {
   const isUser = message.role === 'user';
-  const isError = message.error;
-  const [showFeedback, setShowFeedback] = useState(false);
   
   // Check if model information is available
   const hasModelInfo = message.model_used && message.model_version;
@@ -97,326 +92,178 @@ const ChatMessage = ({ message, isLoading }) => {
         });
     }
   };
-  
-  // Render content with code blocks replaced by CodeBlock components
-  const renderContentWithCodeBlocks = () => {
-    if (codeBlocks.length === 0) {
-      return (
-        <Typography 
-          variant="body1" 
-          component="div"
-          sx={{ 
-            whiteSpace: 'pre-wrap',
-            fontFamily: 'inherit',
-            '& p': { mt: 1, mb: 1 },
-            '& ul, & ol': { pl: 3 },
-            '& li': { mb: 0.5 },
-            '& a': {
-              color: 'primary.main',
-              textDecoration: 'none',
-              '&:hover': {
-                textDecoration: 'underline',
-              }
-            },
-            '& strong': {
-              fontWeight: 600,
-            },
-            '& h1, & h2, & h3, & h4, & h5, & h6': {
-              fontWeight: 600,
-              mt: 2,
-              mb: 1,
-            },
-            '& table': {
-              borderCollapse: 'collapse',
-              width: '100%',
-              my: 2,
-              '& th, & td': {
-                border: '1px solid rgba(0, 0, 0, 0.1)',
-                padding: '8px 12px',
-                textAlign: 'left',
-              },
-              '& th': {
-                backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                fontWeight: 600,
-              },
-              '& tr:nth-of-type(even)': {
-                backgroundColor: 'rgba(0, 0, 0, 0.02)',
-              }
-            }
-          }}
-        >
-          {message.content}
-        </Typography>
-      );
-    }
-    
-    const parts = textContent.split(/\[CODE_BLOCK_(\d+)\]/);
-    
-    return (
-      <React.Fragment>
-        {parts.map((part, index) => {
-          // Even indices are text content
-          if (index % 2 === 0) {
-            return part ? (
-              <Typography 
-                key={`text-${index}`}
-                variant="body1" 
-                component="div"
-                sx={{ 
-                  whiteSpace: 'pre-wrap',
-                  fontFamily: 'inherit',
-                  mt: index === 0 ? 0 : 1,
-                  mb: 1,
-                  '& p': { mt: 1, mb: 1 },
-                  '& ul, & ol': { pl: 3 },
-                  '& li': { mb: 0.5 },
-                  '& a': {
-                    color: 'primary.main',
-                    textDecoration: 'none',
-                    '&:hover': {
-                      textDecoration: 'underline',
-                    }
-                  },
-                  '& strong': {
-                    fontWeight: 600,
-                  },
-                  '& h1, & h2, & h3, & h4, & h5, & h6': {
-                    fontWeight: 600,
-                    mt: 2,
-                    mb: 1,
-                  }
-                }}
-              >
-                {part}
-              </Typography>
-            ) : null;
-          }
-          
-          // Odd indices correspond to code block placeholders
-          const blockIndex = parseInt(part, 10);
-          const block = codeBlocks[blockIndex];
-          
-          if (!block) return null;
-          
-          return (
-            <CodeBlock
-              key={`code-${index}`}
-              language={block.language}
-              code={block.code}
-              showLineNumbers={true}
-            />
-          );
-        })}
-      </React.Fragment>
-    );
-  };
 
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: isUser ? 'flex-end' : 'flex-start',
-        mb: 2.5,
-        maxWidth: '100%',
-      }}
-    >
-      {/* Message sender indicator */}
-      <Typography 
-        variant="caption" 
-        sx={{ 
-          mb: 0.5, 
-          ml: isUser ? 0 : 1.5,
-          mr: isUser ? 1.5 : 0,
-          color: 'text.secondary',
-          fontWeight: 500
-        }}
-      >
-        {isUser ? 'You' : 'Data Analysis Assistant'}
-      </Typography>
-      
-      {/* Message content */}
-      <Box sx={{ display: 'flex', position: 'relative', maxWidth: '100%', width: '100%' }}>
-        {!isUser && (
-          <Box
+    <Fade in={true} timeout={400}>
+      <Box sx={{ mb: 2 }}>
+        <Box 
+          sx={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            px: 0.5, 
+            mb: 0.25,
+            alignItems: 'center'
+          }}
+        >
+          <Typography
+            variant="caption"
             sx={{
-              width: 28,
-              height: 28,
-              borderRadius: '50%',
-              bgcolor: 'primary.main',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              mr: 1,
-              flexShrink: 0,
-              alignSelf: 'flex-start',
+              color: (theme) => theme.palette.text.secondary,
+              fontSize: '0.7rem',
+              fontWeight: 500,
+              ml: isUser ? 'auto' : '0',
+              mr: isUser ? '0' : 'auto',
             }}
           >
-            <SmartToyIcon sx={{ fontSize: 16, color: 'white' }} />
+            {isUser ? 'You' : 'IntelliAssistant'}
+            {message.timestamp && (
+              <Typography 
+                component="span" 
+                sx={{ 
+                  fontSize: '0.65rem',
+                  color: (theme) => theme.palette.text.secondary,
+                  opacity: 0.6,
+                  ml: 0.75,
+                }}
+              >
+                {formatTimestamp(message.timestamp)}
+              </Typography>
+            )}
+          </Typography>
+          
+          {!isLoading && message.content && (
+            <Tooltip title="Copy message">
+              <IconButton 
+                size="small" 
+                onClick={handleCopyContent}
+                sx={{ 
+                  color: (theme) => theme.palette.text.secondary,
+                  padding: 0.3,
+                  fontSize: '0.7rem',
+                }}
+              >
+                <ContentCopyIcon fontSize="inherit" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+        
+        <ChatBubble isUser={isUser}>
+          {isLoading ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', p: 0.5 }}>
+              <CircularProgress size={18} thickness={4} color={isUser ? "secondary" : "primary"} />
+            </Box>
+          ) : (
+            <Box>
+              {textContent.split('\n').map((paragraph, index) => {
+                if (paragraph.includes('[CODE_BLOCK_')) {
+                  // Replace code block placeholder with actual code block
+                  const codeBlockIndexMatch = paragraph.match(/\[CODE_BLOCK_(\d+)\]/);
+                  if (codeBlockIndexMatch) {
+                    const codeBlockIndex = parseInt(codeBlockIndexMatch[1]);
+                    const codeBlock = codeBlocks[codeBlockIndex];
+                    return (
+                      <Box key={`code-${index}`} sx={{ my: 1 }}>
+                        <CodeBlock 
+                          language={codeBlock.language}
+                          code={codeBlock.code}
+                        />
+                      </Box>
+                    );
+                  }
+                }
+                return paragraph ? (
+                  <Typography
+                    key={index}
+                    variant="body2"
+                    component="p"
+                    sx={{
+                      my: paragraph.trim() === '' ? 0.5 : 0,
+                      lineHeight: 1.5,
+                      fontSize: '0.9rem',
+                    }}
+                  >
+                    {paragraph}
+                  </Typography>
+                ) : (
+                  <Box key={index} sx={{ height: '0.5rem' }} />
+                );
+              })}
+              
+              {sqlQuery && (
+                <Box sx={{ mt: 1.5 }}>
+                  <SQLQueryVisualizer query={sqlQuery} />
+                </Box>
+              )}
+              
+              {message.analysis_result && (
+                <Box sx={{ mt: 1.5 }}>
+                  <AnalysisResult result={message.analysis_result} />
+                </Box>
+              )}
+            </Box>
+          )}
+        </ChatBubble>
+        
+        {!isLoading && !isUser && (
+          <Box
+            sx={{
+              display: 'flex',
+              justifyContent: 'flex-start',
+              mt: 0.25,
+              ml: 5,
+              gap: 0.5,
+            }}
+          >
+            <Tooltip title="Like">
+              <IconButton
+                size="small"
+                sx={{
+                  color: (theme) => theme.palette.text.secondary,
+                  p: 0.3,
+                  '&:hover': {
+                    color: (theme) => theme.palette.primary.main,
+                  },
+                }}
+              >
+                <ThumbUpIcon sx={{ fontSize: 16 }} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Dislike">
+              <IconButton
+                size="small"
+                sx={{
+                  color: (theme) => theme.palette.text.secondary,
+                  p: 0.3,
+                  '&:hover': {
+                    color: (theme) => theme.palette.error.main,
+                  },
+                }}
+              >
+                <ThumbDownIcon sx={{ fontSize: 16 }} />
+              </IconButton>
+            </Tooltip>
           </Box>
         )}
         
-        <Box sx={{ 
-          maxWidth: isUser ? '85%' : 'calc(100% - 40px)',
-          width: isUser ? 'auto' : '100%'
-        }}>
-          <ChatBubble 
-            isUser={isUser}
+        {hasModelInfo && (
+          <Typography
+            variant="caption"
             sx={{
-              ...(message.error && {
-                bgcolor: '#ffebee',
-                borderColor: '#ffcdd2',
-              }),
+              color: (theme) => theme.palette.text.secondary,
+              opacity: 0.5,
+              fontSize: '0.65rem',
+              display: 'block',
+              mt: 0.25,
+              ml: 5,
             }}
           >
-            {/* Message content with code blocks */}
-            {isUser ? (
-              <Typography variant="body1" sx={{ color: 'white', fontWeight: 500 }}>
-                {message.content}
-              </Typography>
-            ) : (
-              renderContentWithCodeBlocks()
-            )}
-            
-            {/* Model information display for AI messages */}
-            {!isUser && hasModelInfo && (
-              <Box 
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  mt: 1.5,
-                  pt: 1,
-                  borderTop: theme => `1px solid ${theme.palette.divider}`,
-                  opacity: 0.7,
-                  fontSize: '0.75rem',
-                  color: 'text.secondary'
-                }}
-              >
-                <SmartToyIcon sx={{ fontSize: '0.875rem', mr: 0.5 }} />
-                <Typography variant="caption">
-                  {`Model: ${message.model_used} (v${message.model_version})`}
-                  {isFallback && (
-                    <Typography 
-                      component="span" 
-                      variant="caption" 
-                      sx={{ 
-                        ml: 1, 
-                        color: 'warning.main',
-                        bgcolor: 'warning.light',
-                        px: 0.5,
-                        py: 0.1,
-                        borderRadius: 0.5,
-                        fontWeight: 500
-                      }}
-                    >
-                      Fallback
-                    </Typography>
-                  )}
-                </Typography>
-              </Box>
-            )}
-            
-            {/* Loading indicator */}
-            {isLoading && (
-              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-                <CircularProgress size={20} color="primary" />
-              </Box>
-            )}
-            
-            {/* Copy button for assistant messages */}
-            {!isUser && !isLoading && (
-              <Tooltip title="Copy to clipboard">
-                <IconButton 
-                  size="small" 
-                  onClick={handleCopyContent}
-                  sx={{ 
-                    position: 'absolute', 
-                    top: 8, 
-                    right: 8,
-                    opacity: 0.4,
-                    '&:hover': {
-                      opacity: 0.8,
-                      bgcolor: 'rgba(0, 0, 0, 0.04)',
-                    }
-                  }}
-                >
-                  <ContentCopyIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
-            
-            {/* Timestamp */}
-            <Typography 
-              variant="caption" 
-              sx={{ 
-                display: 'block', 
-                mt: 1, 
-                color: isUser ? 'rgba(255, 255, 255, 0.8)' : 'text.secondary',
-                textAlign: 'right',
-                fontSize: '0.7rem',
-              }}
-            >
-              {formatTimestamp(message.timestamp)}
-            </Typography>
-          </ChatBubble>
-          
-          {/* SQL Query Visualizer - only shown for assistant messages with SQL */}
-          {!isUser && sqlQuery && !isLoading && (
-            <Box sx={{ mt: 2, width: '100%' }}>
-              <SQLQueryVisualizer 
-                query={sqlQuery}
-                results={message.query_results}
-                visualization={message.visualization}
-              />
-            </Box>
-          )}
-          
-          {/* Visualization if available but no SQL */}
-          {!isUser && !sqlQuery && message.visualization && !isLoading && (
-            <Box sx={{ mt: 2, width: '100%' }}>
-              <Box sx={{ p: 2, border: '1px solid rgba(0, 0, 0, 0.08)', borderRadius: '8px' }}>
-                <AnalysisResult visualization={message.visualization} />
-              </Box>
-            </Box>
-          )}
-        </Box>
+            {isFallback ? 'Fallback model: ' : 'Model: '}{message.model_used}
+            {message.model_version && ` (${message.model_version})`}
+          </Typography>
+        )}
       </Box>
-      
-      {/* Feedback buttons for assistant messages - simplified */}
-      {!isUser && !isLoading && (
-        <Box sx={{ 
-          display: 'flex', 
-          mt: 0.5, 
-          ml: 4.5,
-          opacity: showFeedback ? 1 : 0,
-          transition: 'opacity 0.2s',
-          '&:hover': {
-            opacity: 1
-          }
-        }}>
-          <Tooltip title="This was helpful">
-            <IconButton size="small" sx={{ mr: 1 }}>
-              <ThumbUpIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="This was not helpful">
-            <IconButton size="small" sx={{ mr: 1 }}>
-              <ThumbDownIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Save this response">
-            <IconButton size="small" sx={{ mr: 1 }}>
-              <BookmarkIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Share this response">
-            <IconButton size="small">
-              <ShareIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      )}
-    </Box>
+    </Fade>
   );
 };
 

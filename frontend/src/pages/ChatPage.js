@@ -399,177 +399,380 @@ const ChatPage = () => {
   };
 
   return (
-    <ThemeProvider theme={theme}>
-      <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden', bgcolor: 'background.default' }}>
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100vh',
+        overflow: 'hidden',
+        bgcolor: (theme) => theme.palette.background.default,
+      }}
+    >
+      <Box
+        sx={{
+          display: 'flex',
+          height: '100%',
+          overflow: 'hidden',
+        }}
+      >
         {/* Sidebar */}
         <Box
           sx={{
-            width: sidebarOpen ? 300 : 0,
+            width: { 
+              xs: sidebarOpen ? '260px' : '0px', 
+              md: sidebarOpen ? '260px' : '72px' 
+            },
             flexShrink: 0,
-            transition: 'width 0.2s',
+            transition: 'width 0.2s ease-in-out',
+            height: '100%',
+            borderRight: (theme) => `1px solid ${theme.palette.divider}`,
+            bgcolor: (theme) => theme.palette.background.paper,
+            boxShadow: 'none',
+            zIndex: 10,
             overflow: 'hidden',
-            borderRight: '1px solid rgba(0, 0, 0, 0.12)',
-            bgcolor: 'background.paper'
-          }}
-        >
-          {/* Dataset Selection Button */}
-          <Box sx={{ p: 2 }}>
-            <Button
-              fullWidth
-              variant="outlined"
-              onClick={() => setDatasetDialogOpen(true)}
-              startIcon={<AttachFileIcon />}
-              sx={{
-                justifyContent: 'flex-start',
-                mb: 2,
-                borderColor: 'rgba(0, 0, 0, 0.12)',
-                '&:hover': {
-                  borderColor: 'primary.main',
-                  bgcolor: 'rgba(37, 99, 235, 0.08)'
-                }
-              }}
-            >
-              {selectedDataset ? `Dataset: ${selectedDataset.name}` : 'Select Dataset'}
-            </Button>
-          </Box>
-          
-          {/* Rest of the sidebar content */}
-          <ChatHistory 
-            conversations={conversationHistory}
-            activeConversation={activeConversation}
-            onConversationSelect={handleConversationSelect}
-          />
-        </Box>
-
-        {/* Main chat area */}
-        <Box sx={{ flexGrow: 1, height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          {/* Chat header */}
-          <Box sx={{ 
-            p: 2, 
-            borderBottom: '1px solid rgba(0, 0, 0, 0.12)', 
-            bgcolor: 'background.paper',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between'
-          }}>
-            <Typography variant="h6" component="div">
-              {activeConversation ? activeConversation.title : 'New Chat'}
-            </Typography>
-            <Box>
-              <IconButton onClick={toggleSidebar} size="small">
-                {sidebarOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
-              </IconButton>
-            </Box>
-          </Box>
-
-          {/* Messages area */}
-          <Box sx={{ 
-            flexGrow: 1, 
-            overflowY: 'auto',
-            p: 2,
             display: 'flex',
             flexDirection: 'column',
-            gap: 2
-          }}>
-            {messages.map((message) => (
-              <ChatMessage
-                key={message.id}
-                message={message}
-                isLoading={message.isLoading}
-              />
-            ))}
-            <div ref={messagesEndRef} />
+          }}
+        >
+          {/* Sidebar Header */}
+          <Box
+            sx={{
+              p: { xs: 2, md: sidebarOpen ? 2 : 1 },
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarOpen ? 'space-between' : 'center',
+              borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
+              minHeight: '64px',
+            }}
+          >
+            {sidebarOpen ? (
+              <>
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                  <span style={{ color: (theme) => theme.palette.primary.main }}>Intelli</span>Assistant
+                </Typography>
+                
+                <Button
+                  variant="contained"
+                  size="small"
+                  sx={{
+                    borderRadius: '8px',
+                    textTransform: 'none',
+                    py: 0.5,
+                    px: 1.5,
+                    fontWeight: 600,
+                    minWidth: 0,
+                  }}
+                  startIcon={<AddIcon fontSize="small" />}
+                  onClick={() => handleNewChat()}
+                >
+                  New Chat
+                </Button>
+              </>
+            ) : (
+              <IconButton
+                size="small"
+                color="primary"
+                onClick={() => handleNewChat()}
+                sx={{ 
+                  bgcolor: (theme) => theme.palette.primary.main + '20',
+                  '&:hover': {
+                    bgcolor: (theme) => theme.palette.primary.main + '30',
+                  }
+                }}
+              >
+                <AddIcon fontSize="small" />
+              </IconButton>
+            )}
           </Box>
-
-          {/* Suggested queries */}
-          {suggestedQueries.length > 0 && messages.length === 0 && (
-            <Box sx={{ p: 2, borderTop: '1px solid rgba(0, 0, 0, 0.12)' }}>
-              <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary' }}>
-                Suggested queries:
-              </Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {suggestedQueries.map((query, index) => (
-                  <Button
-                    key={index}
-                    variant="outlined"
-                    size="small"
-                    onClick={() => {
-                      setInputValue(query);
-                      handleSendMessage(query);
-                    }}
+          
+          {/* Conversations List */}
+          <Box 
+            sx={{ 
+              flex: 1, 
+              overflow: 'auto', 
+              p: sidebarOpen ? 1.5 : 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: sidebarOpen ? 'stretch' : 'center',
+            }}
+          >
+            {sidebarOpen ? (
+              <ChatHistory
+                conversations={conversationHistory}
+                selectedConversation={activeConversation}
+                onSelect={handleConversationSelect}
+              />
+            ) : (
+              /* Minimized sidebar conversation indicators */
+              conversationHistory.slice(0, 10).map((conversation, index) => (
+                <Box 
+                  key={index}
+                  onClick={() => handleConversationSelect(conversation.id)}
+                  sx={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: conversation.id === activeConversation ? 
+                      (theme) => theme.palette.primary.main + '20' : 
+                      'transparent',
+                    color: conversation.id === activeConversation ?
+                      (theme) => theme.palette.primary.main :
+                      (theme) => theme.palette.text.secondary,
+                    cursor: 'pointer',
+                    mb: 1,
+                    transition: 'all 0.2s',
+                    '&:hover': {
+                      backgroundColor: (theme) => theme.palette.primary.main + '10',
+                    }
+                  }}
+                >
+                  {index + 1}
+                </Box>
+              ))
+            )}
+          </Box>
+          
+          {/* Settings panel at bottom of sidebar */}
+          <Box
+            sx={{
+              p: sidebarOpen ? 1.5 : 1,
+              borderTop: (theme) => `1px solid ${theme.palette.divider}`,
+              display: 'flex',
+              justifyContent: sidebarOpen ? 'space-between' : 'center',
+              alignItems: 'center',
+              bgcolor: (theme) => 
+                theme.palette.mode === 'dark' 
+                  ? 'rgba(255, 255, 255, 0.05)' 
+                  : 'rgba(0, 0, 0, 0.02)',
+              minHeight: '56px',
+            }}
+          >
+            {sidebarOpen ? (
+              <DatasetSelector
+                datasets={[]}
+                selectedDataset={selectedDataset}
+                onDatasetChange={handleDatasetSelect}
+                sx={{ m: 0 }}
+              />
+            ) : (
+              <IconButton
+                size="small"
+                color="inherit"
+                onClick={() => setSidebarOpen(true)}
+              >
+                <ChevronRightIcon fontSize="small" />
+              </IconButton>
+            )}
+          </Box>
+        </Box>
+        
+        {/* Sidebar toggle button for mobile and desktop */}
+        <IconButton
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          sx={{
+            position: 'absolute',
+            top: '12px',
+            left: { 
+              xs: sidebarOpen ? '220px' : '12px',
+              md: sidebarOpen ? '220px' : '60px'
+            },
+            transition: 'left 0.2s ease-in-out',
+            zIndex: 20,
+            bgcolor: (theme) => theme.palette.background.paper,
+            boxShadow: 1,
+            width: '32px',
+            height: '32px',
+            '&:hover': {
+              bgcolor: (theme) => theme.palette.background.paper,
+            },
+          }}
+        >
+          {sidebarOpen ? <ChevronLeftIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
+        </IconButton>
+        
+        {/* Main content area */}
+        <Box
+          sx={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%',
+            position: 'relative',
+            overflow: 'hidden',
+            ml: { xs: 0, md: 0 },
+          }}
+        >
+          <Box
+            sx={{
+              borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
+              py: 1.5,
+              px: 2,
+              minHeight: '48px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              bgcolor: (theme) => theme.palette.background.paper,
+              zIndex: 5,
+              pl: { xs: sidebarOpen ? 2 : 6, md: 2 },
+            }}
+          >
+            <Typography variant="subtitle1" sx={{ fontWeight: 500, color: 'text.primary' }}>
+              {selectedDataset && `Dataset: ${selectedDataset}`}
+            </Typography>
+          </Box>
+          
+          {/* Messages area */}
+          <Box
+            sx={{
+              flex: 1,
+              overflow: 'auto',
+              px: { xs: 0.5, sm: 1, md: 1.5 },
+              py: 1,
+              bgcolor: (theme) => theme.palette.background.default,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <Box sx={{ 
+              width: '100%', 
+              maxWidth: '1000px', 
+              mx: 'auto', 
+              height: '100%',
+              px: { xs: 0.5, sm: 1 },
+            }}>
+              {/* Welcome message */}
+              {messages.length === 0 && (
+                <Box
+                  sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    textAlign: 'center',
+                    mt: { xs: 4, sm: 6, md: 8 },
+                    mb: 2,
+                    px: 1,
+                  }}
+                >
+                  <Typography
+                    variant="h4"
                     sx={{
-                      borderColor: 'rgba(0, 0, 0, 0.12)',
-                      color: 'text.primary',
-                      '&:hover': {
-                        borderColor: 'primary.main',
-                        bgcolor: 'rgba(37, 99, 235, 0.08)'
-                      }
+                      fontWeight: 600,
+                      mb: 2,
+                      background: (theme) => 
+                        theme.palette.mode === 'dark'
+                          ? 'linear-gradient(90deg, #60A5FA 0%, #8B5CF6 100%)'
+                          : 'linear-gradient(90deg, #3B82F6 0%, #6366F1 100%)',
+                      WebkitBackgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent',
                     }}
                   >
-                    {query}
-                  </Button>
+                    Welcome to IntelliAssistant
+                  </Typography>
+                  
+                  <Typography
+                    variant="body1"
+                    color="text.secondary"
+                    sx={{ mb: 3, maxWidth: '600px' }}
+                  >
+                    Ask me anything about your data or explore insights with simple questions.
+                  </Typography>
+                  
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: { 
+                        xs: '1fr', 
+                        sm: 'repeat(2, 1fr)',
+                        md: 'repeat(auto-fill, minmax(220px, 1fr))'
+                      },
+                      gap: 1.5,
+                      width: '100%',
+                      maxWidth: '900px',
+                    }}
+                  >
+                    {suggestedQueries.map((query, index) => (
+                      <Box
+                        key={index}
+                        onClick={() => handleSuggestedQuery(query)}
+                        sx={{
+                          p: 1.5,
+                          borderRadius: 1.5,
+                          border: (theme) => `1px solid ${theme.palette.divider}`,
+                          bgcolor: (theme) => theme.palette.background.paper,
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          '&:hover': {
+                            transform: 'translateY(-2px)',
+                            boxShadow: 1,
+                            borderColor: 'primary.main',
+                          },
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                          {query}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                </Box>
+              )}
+              
+              {/* Messages */}
+              <Box sx={{ 
+                flexGrow: 1, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: messages.length > 0 ? 'flex-start' : 'flex-end',
+                py: 1,
+                mt: messages.length > 0 ? 1 : 0,
+              }}>
+                {messages.map((message, index) => (
+                  <ChatMessage
+                    key={index}
+                    message={message}
+                    isLoading={index === messages.length - 1 && isLoading}
+                  />
                 ))}
+              
+                {/* Auto-scroll anchor */}
+                <div ref={messagesEndRef} />
               </Box>
             </Box>
-          )}
-
+          </Box>
+          
           {/* Input area */}
-          <Box sx={{ 
-            p: 2, 
-            borderTop: '1px solid rgba(0, 0, 0, 0.12)', 
-            bgcolor: 'background.paper'
-          }}>
+          <Box
+            sx={{
+              p: { xs: 1, sm: 1.5 },
+              bgcolor: (theme) => theme.palette.background.paper,
+              borderTop: (theme) => `1px solid ${theme.palette.divider}`,
+              zIndex: 5,
+            }}
+          >
             <ChatInput
-              onSendMessage={handleSendMessage}
+              message={inputValue}
+              setMessage={setInputValue}
+              handleSend={handleSendMessage}
+              isLoading={isLoading}
+              placeholder={
+                isLoading
+                  ? "Generating response..."
+                  : "Ask IntelliAssistant anything..."
+              }
               disabled={isLoading}
-              placeholder="Ask a question about your data..."
+              selectedModel={null}
+              onModelChange={() => {}}
+              useCache={true}
+              onCacheToggle={() => {}}
             />
           </Box>
         </Box>
-
-        {/* Dataset Selection Dialog */}
-        <Dialog
-          open={datasetDialogOpen}
-          onClose={() => setDatasetDialogOpen(false)}
-          maxWidth="md"
-          fullWidth
-          sx={{
-            '& .MuiDialog-paper': {
-              borderRadius: 2,
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-            }
-          }}
-        >
-          <DialogTitle sx={{ 
-            display: 'flex', 
-            justifyContent: 'space-between', 
-            alignItems: 'center',
-            borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
-            pb: 2
-          }}>
-            <Typography variant="h6" component="div">
-              Select Dataset
-            </Typography>
-            <IconButton
-              aria-label="close"
-              onClick={() => setDatasetDialogOpen(false)}
-              sx={{
-                color: 'text.secondary',
-                '&:hover': {
-                  color: 'text.primary',
-                  bgcolor: 'rgba(0, 0, 0, 0.04)'
-                }
-              }}
-            >
-              <CloseIcon />
-            </IconButton>
-          </DialogTitle>
-          <DialogContent sx={{ pt: 2 }}>
-            <DatasetSelector onDatasetSelect={handleDatasetSelect} />
-          </DialogContent>
-        </Dialog>
       </Box>
-    </ThemeProvider>
+    </Box>
   );
 };
 
