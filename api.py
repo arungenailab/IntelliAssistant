@@ -606,6 +606,54 @@ def get_sql_schema():
             'error': f"Error fetching SQL Server schema: {str(e)}"
         }), 500
 
+@app.route('/api/external-data/sql/get-ddl', methods=['POST'])
+def get_sql_ddl():
+    """Return comprehensive database DDL and schema information"""
+    try:
+        data = request.get_json()
+        
+        # Extract connection parameters
+        connection_params = data.get('credentials', {})
+        
+        # Validate required fields
+        if not connection_params.get('server') or not connection_params.get('database'):
+            return jsonify({
+                'success': False,
+                'error': "Server and database names are required"
+            }), 400
+            
+        # Import SQL connector
+        from utils.sql_connector import SQLServerConnector
+        
+        # Create connector
+        connector = SQLServerConnector(connection_params)
+        
+        # Connect to database
+        if not connector.connect():
+            return jsonify({
+                'success': False,
+                'error': f"Failed to connect to the database: {connector.last_error}"
+            }), 400
+            
+        # Get database DDL
+        database_ddl = connector.get_database_ddl()
+        
+        # Disconnect
+        connector.disconnect()
+        
+        return jsonify({
+            'success': True,
+            'ddl': database_ddl
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching SQL Server DDL: {str(e)}")
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': f"Error fetching SQL Server DDL: {str(e)}"
+        }), 500
+
 @app.route('/api/external-data/fetch', methods=['POST'])
 def get_api_data():
     """Fetch data from an external API based on provided parameters"""
@@ -786,6 +834,261 @@ def api_status():
         return jsonify({
             'success': False,
             'error': f"Error checking API status: {str(e)}"
+        }), 500
+
+@app.route('/api/natural-language/sql', methods=['POST', 'OPTIONS'])
+def natural_language_to_sql():
+    """Convert natural language query to SQL and execute it"""
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        return response
+        
+    try:
+        data = request.get_json()
+        user_query = data.get('query', '')
+        connection_params = data.get('credentials', {})
+        database_context = data.get('databaseContext', {})
+        conversation_history = data.get('conversationHistory', [])
+        
+        logger.info(f"Processing natural language to SQL query: {user_query}")
+        
+        # Add detailed logging to debug schema issues
+        if database_context and database_context.get('tables'):
+            if isinstance(database_context.get('tables'), dict):
+                logger.info(f"Using full DDL schema with tables: {list(database_context['tables'].keys())}")
+            elif isinstance(database_context.get('tables'), list):
+                logger.info(f"Using table list: {database_context['tables']}")
+        else:
+            logger.warning("No database schema information provided for SQL generation")
+        
+        # Validate required fields
+        if not user_query:
+            return jsonify({
+                'success': False,
+                'error': "Query is required"
+            }), 400
+            
+        if not connection_params.get('server') or not connection_params.get('database'):
+            return jsonify({
+                'success': False,
+                'error': "Server and database connection parameters are required"
+            }), 400
+            
+        # Get schema information if we have table context
+        schema_info = {}
+        if database_context:
+            # Import SQL connector
+            from utils.sql_connector import SQLServerConnector
+            
+            # Create connector
+            connector = SQLServerConnector(connection_params)
+            
+            # Connect to database
+            if not connector.connect():
+                return jsonify({
+                    'success': False,
+                    'error': f"Failed to connect to the database: {connector.last_error}"
+                }), 400
+            
+            try:
+                # Check what type of database context we have
+                if isinstance(database_context, list) and len(database_context) > 0:
+                    # We have a list of table names
+                    logger.info(f"Using table list for schema context: {database_context}")
+                    
+                    # Get schema for each table in the list
+                    for table_name in database_context:
+                        try:
+                            schema_df = connector.get_table_schema(table_name)
+                            schema_info[table_name] = schema_df.to_dict(orient='records')
+                        except Exception as e:
+                            logger.warning(f"Could not fetch schema for table {table_name}: {str(e)}")
+                    
+                    logger.info(f"Built schema info for tables: {list(schema_info.keys())}")
+                    
+                elif isinstance(database_context, dict) and database_context.get('tables'):
+                    # Handle nested tables structure
+                    if isinstance(database_context.get('tables'), list):
+                        # List of table names
+                        logger.info(f"Using nested table list: {database_context.get('tables')}")
+                        for table_name in database_context.get('tables', []):
+                            try:
+                                schema_df = connector.get_table_schema(table_name)
+                                schema_info[table_name] = schema_df.to_dict(orient='records')
+                            except Exception as e:
+                                logger.warning(f"Could not fetch schema for table {table_name}: {str(e)}")
+                                
+                        logger.info(f"Built schema info for tables: {list(schema_info.keys())}")
+                    elif isinstance(database_context.get('tables'), dict):
+                        # Complete DDL structure that was passed
+                        schema_info = database_context
+                        logger.info(f"Using provided DDL schema with {len(schema_info.get('tables', {}))} tables and {len(schema_info.get('relationships', []))} relationships")
+            except Exception as e:
+                logger.error(f"Error building schema info: {str(e)}")
+                logger.error(traceback.format_exc())
+            finally:
+                # Disconnect
+                connector.disconnect()
+        else:
+            logger.warning("No database context provided for schema info")
+            
+        # Import SQL generation utility
+        from utils.sql_generation import generate_sql_from_natural_language
+        
+        # Convert natural language to SQL
+        sql_result = generate_sql_from_natural_language(
+            user_query=user_query,
+            schema_info=schema_info,
+            conversation_history=conversation_history
+        )
+        
+        # Log the generated SQL for debugging
+        logger.info(f"Generated SQL: {sql_result.get('sql', 'No SQL generated')}")
+        logger.info(f"Confidence: {sql_result.get('confidence', 0)}")
+        
+        # Execute the generated SQL if requested
+        results = None
+        visualization = None
+        if data.get('execute', True) and sql_result.get('sql'):
+            # Import SQL data fetcher
+            from utils.sql_connector import fetch_sql_data
+            
+            # Fetch the data
+            try:
+                # Log the query before execution
+                logger.info(f"Executing SQL query: {sql_result.get('sql')}")
+                
+                results_df = fetch_sql_data(
+                    connection_params=connection_params,
+                    query=sql_result.get('sql'),
+                    limit=data.get('limit', 1000)
+                )
+                
+                # Convert to records
+                results = results_df.to_dict(orient='records')
+                
+                # Generate visualization if the query appears to be for visualization
+                if any(term in user_query.lower() for term in ['chart', 'graph', 'plot', 'visualize', 'show', 'display']):
+                    from utils.visualization_helper import create_visualization
+                    visualization = create_visualization(results_df, user_query)
+            except Exception as e:
+                error_message = str(e)
+                logger.error(f"Error executing SQL: {error_message}")
+                
+                # Check if it's an invalid table name error
+                if "Invalid object name" in error_message:
+                    # Try to extract the table name from the error
+                    import re
+                    table_match = re.search(r"Invalid object name '([^']+)'", error_message)
+                    invalid_table = table_match.group(1) if table_match else "unknown"
+                    
+                    # Try to suggest correct table names
+                    available_tables = list(schema_info.keys()) if isinstance(schema_info, dict) else []
+                    if isinstance(schema_info, dict) and 'tables' in schema_info:
+                        available_tables = list(schema_info['tables'].keys())
+                    
+                    error_message = f"Table '{invalid_table}' does not exist in the database. Available tables: {', '.join(available_tables)}"
+                
+                return jsonify({
+                    'success': True,
+                    'sql': sql_result.get('sql'),
+                    'explanation': sql_result.get('explanation'),
+                    'error': error_message,
+                    'available_tables': available_tables if 'available_tables' in locals() else []
+                }), 200
+        
+        return jsonify({
+            'success': True,
+            'sql': sql_result.get('sql'),
+            'explanation': sql_result.get('explanation'),
+            'confidence': sql_result.get('confidence', 0.0),
+            'results': results,
+            'visualization': visualization
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in natural language to SQL conversion: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': f"Error in natural language to SQL conversion: {str(e)}",
+            'traceback': traceback.format_exc()
+        }), 500
+
+# Add a debugging endpoint for SQL database schema
+@app.route('/api/external-data/sql/debug-schema', methods=['GET'])
+def debug_sql_schema():
+    """Debug endpoint to show what tables are available in the stored DDL"""
+    try:
+        # Import SQL connector
+        from utils.sql_connector import SQLServerConnector
+        
+        # Get connection parameters from request
+        connection_params = {
+            'server': request.args.get('server'),
+            'database': request.args.get('database'),
+            'username': request.args.get('username', ''),
+            'password': request.args.get('password', ''),
+            'trusted_connection': request.args.get('trusted_connection', 'false').lower() == 'true'
+        }
+        
+        # If connection params are provided, get the schema directly
+        if connection_params['server'] and connection_params['database']:
+            logger.info(f"Getting schema for {connection_params['server']}/{connection_params['database']}")
+            
+            # Create connector
+            connector = SQLServerConnector(connection_params)
+            
+            # Connect to database
+            if not connector.connect():
+                return jsonify({
+                    'success': False,
+                    'error': f"Failed to connect to the database: {connector.last_error}"
+                }), 400
+            
+            try:
+                # List tables
+                tables = connector.list_tables()
+                
+                # Get schema for each table
+                schema_info = {}
+                for table_name in tables[:10]:  # Limit to 10 tables for debugging
+                    try:
+                        schema_df = connector.get_table_schema(table_name)
+                        schema_info[table_name] = schema_df.to_dict(orient='records')
+                    except Exception as e:
+                        logger.warning(f"Could not fetch schema for table {table_name}: {str(e)}")
+                        
+                return jsonify({
+                    'success': True,
+                    'server': connection_params['server'],
+                    'database': connection_params['database'],
+                    'tables': tables,
+                    'schemas': schema_info
+                }), 200
+            except Exception as e:
+                logger.error(f"Error getting database schema: {str(e)}")
+                return jsonify({
+                    'success': False,
+                    'error': f"Error getting database schema: {str(e)}"
+                }), 500
+            finally:
+                # Close connection
+                connector.disconnect()
+        
+        # Default response with instructions
+        return jsonify({
+            'success': True,
+            'message': 'Use this endpoint with server and database query parameters to debug SQL schema',
+            'example': '/api/external-data/sql/debug-schema?server=yourserver&database=yourdb'
+        }), 200
+            
+    except Exception as e:
+        logger.error(f"Error in debug-schema endpoint: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f"Error: {str(e)}"
         }), 500
 
 if __name__ == '__main__':

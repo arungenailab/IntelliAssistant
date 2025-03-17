@@ -26,6 +26,11 @@ import 'prismjs/components/prism-ruby';
 import 'prismjs/components/prism-r';
 import './prism-material-theme.css';
 
+// Register plain text language for fallback
+Prism.languages.text = Prism.languages.plain = {
+  'text': /[\s\S]+/
+};
+
 /**
  * Modern code block with enhanced syntax highlighting
  */
@@ -36,7 +41,7 @@ const CodeBlock = ({ language = 'javascript', code = '', showLineNumbers = true 
   const isDarkMode = theme.palette.mode === 'dark';
   
   // Normalize language name
-  const normalizedLanguage = language.toLowerCase().replace(/^\s*\{?\.?(\w+).*\}?$/, '$1');
+  const normalizedLanguage = language ? language.toLowerCase().replace(/^\s*\{?\.?(\w+).*\}?$/, '$1') : 'text';
   
   // Map language to Prism language
   const languageMap = {
@@ -67,13 +72,22 @@ const CodeBlock = ({ language = 'javascript', code = '', showLineNumbers = true 
     ruby: 'ruby',
     r: 'r',
     text: 'text',
+    '': 'text',
+    plain: 'text'
   };
   
-  const prismLanguage = languageMap[normalizedLanguage] || 'javascript';
+  // Get the Prism language with a fallback to plain text
+  const prismLanguage = (languageMap[normalizedLanguage] && Prism.languages[languageMap[normalizedLanguage]]) 
+    ? languageMap[normalizedLanguage] 
+    : 'text';
   
   useEffect(() => {
     if (codeRef.current) {
-      Prism.highlightElement(codeRef.current);
+      try {
+        Prism.highlightElement(codeRef.current);
+      } catch (error) {
+        console.error("Error highlighting code:", error);
+      }
     }
   }, [code, prismLanguage]);
   
@@ -90,45 +104,35 @@ const CodeBlock = ({ language = 'javascript', code = '', showLineNumbers = true 
         position: 'relative',
         fontFamily: '"Roboto Mono", monospace',
         fontSize: '0.85rem',
-        borderRadius: theme.shape.borderRadius,
-        background: isDarkMode ? 'rgba(30, 30, 30, 0.95)' : 'rgba(245, 245, 245, 0.95)',
-        border: `1px solid ${isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)'}`,
+        borderRadius: '6px',
+        background: isDarkMode ? 'rgba(34, 34, 34, 0.95)' : 'rgba(247, 247, 248, 0.95)',
+        border: `1px solid ${isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
         mb: 2,
         overflow: 'hidden',
-        boxShadow: isDarkMode 
-          ? '0 4px 8px rgba(0, 0, 0, 0.4)' 
-          : '0 2px 4px rgba(0, 0, 0, 0.05)',
-        transition: 'box-shadow 0.3s ease, transform 0.3s ease',
+        boxShadow: 'none',
+        transition: 'border-color 0.2s ease',
         '&:hover': {
-          boxShadow: isDarkMode 
-            ? '0 5px 10px rgba(0, 0, 0, 0.5)' 
-            : '0 4px 8px rgba(0, 0, 0, 0.1)',
-          transform: 'translateY(-1px)',
+          borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)',
         }
       }}
     >
       {/* Language label and copy button */}
       <Box
         sx={{
-          position: 'absolute',
-          top: '8px',
-          right: '8px',
-          zIndex: 10,
           display: 'flex',
-          gap: '4px',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '8px 12px',
+          borderBottom: `1px solid ${isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
+          background: isDarkMode ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.03)',
         }}
       >
         <Box
           sx={{
-            fontSize: '0.7rem',
-            textTransform: 'uppercase',
+            fontSize: '0.75rem',
             fontWeight: 500,
             color: isDarkMode ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-            letterSpacing: '0.05em',
-            padding: '3px 8px',
-            borderRadius: '4px',
-            background: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
-            backdropFilter: 'blur(10px)',
+            letterSpacing: '0.02em',
           }}
         >
           {normalizedLanguage}
@@ -139,42 +143,40 @@ const CodeBlock = ({ language = 'javascript', code = '', showLineNumbers = true 
             size="small"
             onClick={handleCopyCode}
             sx={{
-              padding: '3px',
-              color: isDarkMode ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-              background: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
-              backdropFilter: 'blur(10px)',
+              padding: '4px',
+              color: isDarkMode ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)',
               '&:hover': {
-                backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)',
-                color: theme.palette.primary.main,
+                backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+                color: '#10a37f',
               },
             }}
           >
-            {copied ? <CheckIcon sx={{ fontSize: '0.9rem' }} /> : <ContentCopyIcon sx={{ fontSize: '0.9rem' }} />}
+            {copied ? <CheckIcon sx={{ fontSize: '1rem' }} /> : <ContentCopyIcon sx={{ fontSize: '1rem' }} />}
           </IconButton>
         </Tooltip>
       </Box>
       
       <Box
         sx={{
-          pt: 3.5,
-          pb: 2.5,
-          px: 2,
+          pt: 2,
+          pb: 2,
+          px: 3,
           overflow: 'auto',
-          maxHeight: '400px',
+          maxHeight: '500px',
           
           // Styling for line numbers
           ...(showLineNumbers && {
             counterReset: 'line',
             '& .token-line': {
               position: 'relative',
-              paddingLeft: '3.5em',
+              paddingLeft: '3em',
               '&::before': {
                 content: 'counter(line)',
                 counterIncrement: 'line',
                 position: 'absolute',
                 left: 0,
                 textAlign: 'right',
-                width: '2.5em',
+                width: '2em',
                 paddingRight: '1em',
                 color: isDarkMode ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.3)',
                 fontSize: '0.8em',
@@ -191,14 +193,22 @@ const CodeBlock = ({ language = 'javascript', code = '', showLineNumbers = true 
         </pre>
       </Box>
       
-      {/* Copy notification */}
+      {/* Remove Snackbar for a cleaner notification system */}
       <Snackbar 
         open={copied} 
         autoHideDuration={2000} 
         onClose={() => setCopied(false)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
-        <Alert severity="success" variant="filled" sx={{ width: '100%' }}>
+        <Alert 
+          severity="success" 
+          variant="filled" 
+          sx={{ 
+            bgcolor: '#10a37f',
+            color: 'white',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
+          }}
+        >
           Code copied to clipboard
         </Alert>
       </Snackbar>

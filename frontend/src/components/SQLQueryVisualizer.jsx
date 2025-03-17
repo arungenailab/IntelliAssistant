@@ -15,6 +15,8 @@ const SQLQueryVisualizer = ({ query, results, visualization }) => {
   const isDarkMode = theme.palette.mode === 'dark';
   
   const handleCopy = () => {
+    if (!query) return;
+    
     navigator.clipboard.writeText(query)
       .then(() => {
         console.log('SQL query copied to clipboard');
@@ -24,7 +26,8 @@ const SQLQueryVisualizer = ({ query, results, visualization }) => {
       });
   };
   
-  const formattedQuery = formatSQLQuery(query);
+  // Handle empty or undefined query
+  const formattedQuery = query ? formatSQLQuery(query) : 'No SQL query available';
   
   return (
     <Box

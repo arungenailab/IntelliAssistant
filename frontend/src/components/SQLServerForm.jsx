@@ -23,7 +23,9 @@ const SQLServerForm = ({
   setDatasetName,
   loading,
   error,
-  setError
+  setError,
+  onSave = () => {},
+  onClose = () => {}
 }) => {
   const [credentials, setCredentials] = useState({
     server: '',
@@ -41,52 +43,136 @@ const SQLServerForm = ({
   const [connectionStatus, setConnectionStatus] = useState(null);
   const [availableDrivers, setAvailableDrivers] = useState([]);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   
   // Get the API base URL
   const apiBaseUrl = getApiBaseUrl();
   
   const handleSaveConnection = async () => {
-    // Validate connection parameters
-    if (!credentials.server || !credentials.database) {
-      setError("Server and database names are required");
-      return;
-    }
-    
+    setIsLoading(true);
     setError(null);
-    setSaveSuccess(false);
     
     try {
-      console.log(`Saving SQL Server connection to ${apiBaseUrl}/external-data/configure`);
-      
+      // Send the connection details to the backend
       const response = await fetch(`${apiBaseUrl}/external-data/configure`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include', // Include cookies for CORS requests
         body: JSON.stringify({
           api_source_id: 'sql_server',
-          credentials: credentials
+          credentials: {
+            server: credentials.server,
+            database: credentials.database,
+            username: credentials.username,
+            password: credentials.password,
+            trusted_connection: credentials.trusted_connection
+          }
         }),
       });
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Error response:', errorText);
-        throw new Error(`Server responded with status: ${response.status}. ${errorText}`);
-      }
-      
       const data = await response.json();
       
-      if (data.success) {
-        console.log('SQL Server connection saved successfully');
-        setSaveSuccess(true);
-      } else {
-        throw new Error(data.error || 'Failed to save connection');
+      if (!data.success) {
+        setError(data.error || 'Unknown error occurred');
+        setIsLoading(false);
+        return;
       }
-    } catch (err) {
-      setError(`Error saving connection: ${err.message}`);
-      console.error('Error saving connection:', err);
+      
+      // Fetch database DDL for improved text-to-SQL capabilities
+      console.log('Fetching database DDL for improved text-to-SQL capabilities...');
+      try {
+        const ddlResponse = await fetch(`${apiBaseUrl}/external-data/sql/get-ddl`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            credentials: {
+              server: credentials.server,
+              database: credentials.database,
+              username: credentials.username,
+              password: credentials.password,
+              trusted_connection: credentials.trusted_connection
+            }
+          }),
+        });
+        
+        const ddlData = await ddlResponse.json();
+        
+        // Safely sanitize and parse the DDL data before storing
+        if (ddlData && ddlData.success && ddlData.ddl) {
+          try {
+            // The actual DDL is wrapped in a 'ddl' property
+            const ddlObj = ddlData.ddl;
+            
+            // Ensure we have valid JSON by stringifying and parsing
+            // This helps catch any NaN values or other JSON serialization issues
+            const sanitizedDDL = JSON.stringify(ddlObj);
+            const parsedDDL = JSON.parse(sanitizedDDL);
+            
+            // Log what tables were found
+            if (parsedDDL.tables) {
+              const tableNames = Object.keys(parsedDDL.tables);
+              console.log(`Found ${tableNames.length} tables in database: ${tableNames.join(', ')}`);
+              
+              // Log full structure for debugging
+              console.log('DDL structure saved to localStorage:', {
+                tablesCount: tableNames.length,
+                relationshipsCount: parsedDDL.relationships?.length || 0,
+                indexesCount: parsedDDL.indexes?.length || 0,
+                firstTableColumns: tableNames.length > 0 ? parsedDDL.tables[tableNames[0]].length : 0
+              });
+            } else {
+              console.warn('No tables property found in DDL data structure', parsedDDL);
+            }
+            
+            // Save the DDL to localStorage
+            localStorage.setItem('sqlDatabaseDDL', sanitizedDDL);
+            console.log('Database DDL saved to localStorage for text-to-SQL enhancement');
+          } catch (parseError) {
+            console.error('Error parsing DDL data:', parseError);
+            setError(`Database connection saved, but schema fetch failed: ${parseError.message}`);
+          }
+        } else if (ddlData && ddlData.error) {
+          console.error('Error fetching database DDL:', ddlData.error);
+          setError(`Database connection saved, but schema fetch failed: ${ddlData.error}`);
+        }
+      } catch (ddlError) {
+        console.error('Error fetching database DDL:', ddlError);
+        setError(`Database connection saved, but schema fetch failed: ${ddlError.message}`);
+      }
+      
+      console.log('SQL Server connection saved successfully');
+      
+      // Show success message before closing
+      setSaveSuccess(true);
+      
+      // Save connection details for easy reconnection
+      localStorage.setItem('sqlServer', credentials.server);
+      localStorage.setItem('sqlDatabase', credentials.database);
+      localStorage.setItem('sqlUsername', credentials.username);
+      localStorage.setItem('sqlTrustedConnection', credentials.trusted_connection.toString());
+      
+      // Clear the password from storage for security
+      localStorage.removeItem('sqlPassword');
+      
+      // Call onSave with the connection details
+      if (onSave) {
+        onSave(credentials);
+      }
+      
+      // Set loading to false immediately but keep form open longer
+      setIsLoading(false);
+      
+      // Delay closing the form to allow user to see success message
+      setTimeout(() => {
+        onClose();
+      }, 3000);
+    } catch (error) {
+      console.error('Error saving SQL Server connection:', error);
+      setError(`Error saving connection: ${error.message}`);
+      setIsLoading(false);
     }
   };
   
@@ -374,10 +460,31 @@ const SQLServerForm = ({
       {saveSuccess && (
         <Alert 
           severity="success" 
-          icon={<CheckCircle style={{ height: '16px', width: '16px' }} />}
-          style={{ marginTop: '16px' }}
+          icon={<CheckCircle style={{ height: '20px', width: '20px' }} />}
+          style={{ 
+            marginTop: '16px',
+            padding: '12px',
+            fontSize: '1rem',
+            boxShadow: '0 1px 4px rgba(0, 0, 0, 0.05)'
+          }}
+          variant="outlined"
         >
-          SQL Server connection saved successfully!
+          SQL Server connection saved successfully! Found {
+            (() => {
+              try {
+                const storedDDL = localStorage.getItem('sqlDatabaseDDL');
+                if (storedDDL) {
+                  const ddlObj = JSON.parse(storedDDL);
+                  if (ddlObj?.tables) {
+                    return Object.keys(ddlObj.tables).length;
+                  }
+                }
+                return 0;
+              } catch (e) {
+                return 0;
+              }
+            })()
+          } tables.
         </Alert>
       )}
     </div>

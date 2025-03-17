@@ -51,6 +51,56 @@ except Exception as e:
     genai = None
     DEFAULT_MODEL = None
 
+def get_gemini_client():
+    """
+    Returns the Gemini client for use in other modules.
+    If Gemini is not properly configured, it will return a fallback client.
+    
+    Returns:
+        The configured Gemini client or a fallback implementation
+    """
+    if genai is None:
+        # Return a fallback client if Gemini is not available
+        logger.warning("Gemini client not available, returning fallback implementation")
+        return FallbackGeminiClient()
+    
+    # Return a wrapper around the Gemini model that has generate_content method
+    return GeminiClient()
+
+class GeminiClient:
+    """Wrapper for Gemini model that provides generate_content method"""
+    
+    def __init__(self):
+        self.model = genai.GenerativeModel("models/gemini-2.0-flash")
+    
+    def generate_content(self, prompt):
+        """Generate content using the Gemini model"""
+        try:
+            response = self.model.generate_content(prompt)
+            return response
+        except Exception as e:
+            logger.error(f"Error generating content: {str(e)}")
+            return FallbackResponse(f"Error generating content: {str(e)}")
+
+class FallbackGeminiClient:
+    """Fallback implementation when Gemini is not available"""
+    
+    def generate_content(self, prompt):
+        """Return a fallback response when Gemini is not available"""
+        logger.warning("Using fallback generate_content method")
+        response_text = (
+            "I'm unable to process this request because the Gemini API is not "
+            "properly configured. Please ensure the GEMINI_API_KEY is set correctly "
+            "in your environment variables or config file."
+        )
+        return FallbackResponse(response_text)
+
+class FallbackResponse:
+    """Mimics the Gemini response object"""
+    
+    def __init__(self, text):
+        self.text = text
+
 def analyze_data(user_query: str, data: pd.DataFrame, conversation_history: Optional[List] = None, model_id: str = None, use_cache: bool = True) -> Dict[str, Any]:
     """
     Analyze data based on user query using Gemini API.

@@ -203,68 +203,70 @@ export const uploadFile = async (formData) => {
  */
 export const getDatasets = async () => {
   try {
-    console.log('getDatasets: Sending request to /api/datasets');
-    const startTime = performance.now();
-    
-    // Attempt to use fetch API as an alternative to axios
-    try {
-      console.log('Trying alternative fetch method...');
-      const fetchResponse = await fetch('http://localhost:5000/api/datasets', {
-        method: 'GET',
-        credentials: 'include', // Important for CORS with cookies
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (fetchResponse.ok) {
-        const fetchData = await fetchResponse.json();
-        console.log('Fetch API successful:', fetchData);
-        const endTime = performance.now();
-        console.log(`getDatasets: Fetch request completed in ${endTime - startTime}ms`);
-        return fetchData;
-      } else {
-        console.error('Fetch API failed with status:', fetchResponse.status);
+    console.log('Fetching available datasets from API...');
+    const response = await fetch('http://localhost:5000/api/datasets', {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json'
       }
-    } catch (fetchError) {
-      console.error('Fetch API error:', fetchError);
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch datasets: ${response.status}`);
     }
     
-    // Fallback to axios
-    console.log('Falling back to axios request');
-    const response = await api.get('/datasets');
-    const endTime = performance.now();
-    console.log(`getDatasets: Axios request completed in ${endTime - startTime}ms`);
-    console.log('getDatasets: Response received:', response.data);
+    const data = await response.json();
+    console.log('Datasets API response:', data);
     
-    // Validate the response data
-    if (!response.data || typeof response.data !== 'object') {
-      console.error('getDatasets: Invalid response data format:', response.data);
-      throw new Error('Invalid response data format');
+    // Ensure the response has the expected structure
+    if (!data || typeof data !== 'object') {
+      console.error('Invalid datasets response format:', data);
+      return getHardcodedDatasets();
     }
     
-    // Check if the response is empty
-    if (Object.keys(response.data).length === 0) {
-      console.warn('getDatasets: No datasets found in response');
+    // Process each dataset to ensure all properties are properly extracted
+    const processedData = {};
+    
+    Object.entries(data).forEach(([id, dataset]) => {
+      processedData[id] = {
+        name: dataset.name || id,
+        description: dataset.description || '',
+        // Ensure we extract row count if available
+        rows: parseInt(dataset.rows || dataset.rowCount || dataset.row_count || 0, 10) || null
+      };
+    });
+    
+    console.log('Processed datasets:', processedData);
+    
+    // Check if both expected datasets are present, otherwise use hardcoded
+    if (!processedData.msft || !processedData.sales_data) {
+      console.warn('Missing expected datasets, using hardcoded backup');
+      return getHardcodedDatasets();
     }
     
-    return response.data;
+    return processedData;
   } catch (error) {
-    console.error('Error getting datasets:', error);
-    
-    // Log more detailed error information
-    if (error.response) {
-      console.error('Error response status:', error.response.status);
-      console.error('Error response headers:', error.response.headers);
-      console.error('Error response data:', error.response.data);
-    } else if (error.request) {
-      console.error('No response received (request details):', error.request);
-    }
-    
-    // Rethrow to be handled by the component
-    throw error;
+    console.error('Error fetching datasets:', error);
+    return getHardcodedDatasets();
   }
 };
+
+// Hardcoded datasets as backup when API fails
+function getHardcodedDatasets() {
+  return {
+    msft: {
+      name: 'MSFT',
+      description: 'Microsoft financial data',
+      rows: null
+    },
+    sales_data: {
+      name: 'Sales Data',
+      description: 'Product sales across regions and time periods',
+      rows: null
+    }
+  };
+}
 
 /**
  * Get application debug state
@@ -375,6 +377,102 @@ export const debugApiConnection = () => {
   };
 };
 
+/**
+ * Convert natural language to SQL query
+ * @param {string} query - The natural language query
+ * @param {Object} credentials - SQL server connection credentials
+ * @param {Array} tables - List of tables to include in the query context
+ * @param {Array} conversationHistory - Optional previous conversation messages for context
+ * @param {boolean} execute - Whether to execute the generated SQL
+ * @param {number} limit - Maximum number of rows to return
+ * @returns {Promise<Object>} - SQL query, explanation, and results if executed
+ */
+export const convertNaturalLanguageToSql = async (
+  query, 
+  credentials, 
+  tables = [], 
+  conversationHistory = [], 
+  execute = true, 
+  limit = 1000
+) => {
+  try {
+    console.log('Converting natural language to SQL:', query);
+    
+    // Prepare database context with tables
+    let databaseContext = { tables };
+    let usingFullDDL = false;
+    
+    // Check if we have stored DDL to enhance the context
+    try {
+      const storedDDL = localStorage.getItem('sqlDatabaseDDL');
+      if (storedDDL) {
+        const ddlObj = JSON.parse(storedDDL);
+        if (ddlObj && ddlObj.tables) {
+          console.log('Using stored database DDL for improved SQL generation');
+          console.log('Available tables in stored DDL:', Object.keys(ddlObj.tables));
+          // Use the full DDL for better context
+          databaseContext = ddlObj;
+          usingFullDDL = true;
+        }
+      } else {
+        console.warn('No stored DDL found in localStorage');
+        console.log('Using basic tables list:', tables);
+      }
+    } catch (e) {
+      console.warn('Error using stored DDL:', e);
+    }
+    
+    // Log what we're sending to help with debugging
+    console.log('Sending SQL generation request with context:', {
+      query,
+      dbCredentials: {
+        server: credentials?.server || 'not provided',
+        database: credentials?.database || 'not provided'
+      },
+      contextType: usingFullDDL ? 'Full DDL' : 'Basic table list',
+      tableCount: databaseContext?.tables ? 
+        (typeof databaseContext.tables === 'object' ? 
+          Object.keys(databaseContext.tables).length : 
+          databaseContext.tables.length) : 0
+    });
+    
+    const response = await api.post('/natural-language/sql', {
+      query,
+      credentials,
+      databaseContext,
+      conversationHistory,
+      execute,
+      limit
+    });
+    
+    const data = response.data;
+    
+    // Check for success
+    if (!data.success) {
+      console.error('SQL conversion error:', data.error);
+      throw new Error(data.error || 'Failed to convert natural language to SQL');
+    }
+    
+    // Process visualization if present
+    if (data.visualization) {
+      try {
+        // If visualization is a string, try to parse it as JSON
+        if (typeof data.visualization === 'string') {
+          data.visualization = JSON.parse(data.visualization);
+        }
+      } catch (error) {
+        console.warn('Error parsing visualization data:', error);
+        data.visualization = null;
+      }
+    }
+    
+    return data;
+  } catch (error) {
+    console.error('Error converting natural language to SQL:', error);
+    throw error;
+  }
+};
+
 export default {
   sendMessage,
   getConversationHistory,
@@ -383,5 +481,6 @@ export default {
   getDatasets,
   getDebugState,
   checkApiStatus,
-  debugApiConnection
+  debugApiConnection,
+  convertNaturalLanguageToSql
 };

@@ -1,64 +1,75 @@
 import React from 'react';
-import { Box, Paper, Avatar, useTheme } from '@mui/material';
-import PersonIcon from '@mui/icons-material/Person';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
+import { Box, Avatar } from '@mui/material';
+import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
+import PersonOutlineOutlinedIcon from '@mui/icons-material/PersonOutlineOutlined';
+import { useTheme } from '../../contexts/ThemeContext';
 
 /**
- * A modern chat bubble component following the specified requirements
- * @param {boolean} isUser - Whether the message is from the user
- * @param {React.ReactNode} children - The content to be displayed inside the bubble
- * @param {object} sx - Additional styles to apply to the bubble
- * @returns {JSX.Element}
+ * A ChatGPT-inspired chat bubble component
+ * 
+ * @param {Object} props
+ * @param {boolean} props.isUser - Whether the message is from the user
+ * @param {ReactNode} props.children - The content of the chat bubble
  */
-const ChatBubble = ({ isUser, children, sx = {} }) => {
-  const theme = useTheme();
-  const isDarkMode = theme.palette.mode === 'dark';
+const ChatBubble = ({ isUser, children }) => {
+  const { isDarkMode } = useTheme();
   
+  // Define colors based on theme
+  const userBgColor = isDarkMode ? 'hsl(210, 10%, 15%)' : 'hsl(0, 0%, 95%)';
+  const assistantBgColor = isDarkMode ? 'transparent' : 'transparent';
+  
+  // Message classes for styling
+  const messageClass = isUser ? 'user-message' : 'assistant-message';
+
   return (
     <Box
+      className={messageClass}
       sx={{
         display: 'flex',
-        flexDirection: isUser ? 'row-reverse' : 'row',
-        alignItems: 'flex-start',
-        gap: 1,
-        mb: 1.5,
         width: '100%',
-        maxWidth: '100%',
+        py: { xs: 2, sm: 3 },
+        px: { xs: 1, sm: 2 },
+        bgcolor: isUser ? userBgColor : assistantBgColor,
+        color: 'text.primary',
+        transition: 'background-color 0.2s ease',
       }}
     >
-      {/* Avatar */}
-      <Avatar
-        sx={{
-          bgcolor: isUser ? 'secondary.main' : 'primary.main',
-          width: 34,
-          height: 34,
-          mt: 1,
-          boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)',
-          opacity: 0.9,
-        }}
-      >
-        {isUser ? <PersonIcon sx={{ fontSize: 18 }} /> : <SmartToyIcon sx={{ fontSize: 18 }} />}
-      </Avatar>
-      
-      {/* Message Bubble */}
-      <Paper
-        elevation={1}
-        sx={{
-          p: 1.5,
-          borderRadius: 2,
-          maxWidth: { xs: '85%', sm: '75%', md: '70%' },
-          bgcolor: isUser 
-            ? isDarkMode ? 'rgba(245, 245, 245, 0.08)' : '#f5f5f5' 
-            : isDarkMode ? 'rgba(227, 242, 253, 0.12)' : '#e3f2fd',
-          color: theme.palette.text.primary,
-          boxShadow: isDarkMode 
-            ? '0 1px 3px rgba(0, 0, 0, 0.25)' 
-            : '0 1px 2px rgba(0, 0, 0, 0.1)',
-          ...sx
-        }}
-      >
+      <Box sx={{ mr: 3, pt: 0.5 }}>
+        <Avatar
+          sx={{
+            bgcolor: isUser 
+              ? (isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)')
+              : (isDarkMode ? '#10a37f' : '#10a37f'),
+            width: 36,
+            height: 36,
+            color: isUser 
+              ? 'text.primary' 
+              : '#ffffff',
+            boxShadow: isUser ? 'none' : '0 2px 6px rgba(0,0,0,0.15)',
+          }}
+        >
+          {isUser ? (
+            <PersonOutlineOutlinedIcon 
+              sx={{ 
+                fontSize: '1.3rem',
+                color: isDarkMode ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.7)',
+              }} 
+            />
+          ) : (
+            <SmartToyOutlinedIcon sx={{ fontSize: '1.3rem' }} />
+          )}
+        </Avatar>
+      </Box>
+
+      <Box sx={{ 
+        flex: 1, 
+        maxWidth: 'calc(100% - 60px)', 
+        wordBreak: 'break-word',
+        fontSize: '1rem',
+        lineHeight: 1.6,
+      }}>
         {children}
-      </Paper>
+      </Box>
     </Box>
   );
 };

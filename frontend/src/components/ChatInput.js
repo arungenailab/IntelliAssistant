@@ -16,7 +16,7 @@ const ChatInput = ({
   handleSend,
   disabled = false, 
   isLoading = false,
-  placeholder = "Ask IntelliAssistant anything...",
+  placeholder = "Message IntelliAssistant...",
   selectedModel = 'gemini-2.0-flash',
   onModelChange = () => {},
   useCache = true,
@@ -24,6 +24,7 @@ const ChatInput = ({
 }) => {
   const inputRef = useRef(null);
   const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
   
   // Focus input when component mounts
   useEffect(() => {
@@ -38,6 +39,10 @@ const ChatInput = ({
     }
   };
   
+  const handleChange = (e) => {
+    setMessage(e.target.value);
+  };
+  
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -49,76 +54,81 @@ const ChatInput = ({
     <Box
       sx={{
         width: '100%',
-        maxWidth: '1000px',
+        maxWidth: '48rem',
         mx: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 1,
+        p: { xs: 1, sm: 2 },
       }}
     >
       <TextField
-        inputRef={inputRef}
         fullWidth
         multiline
-        maxRows={4}
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        onKeyPress={handleKeyPress}
-        placeholder={placeholder}
         variant="outlined"
-        disabled={disabled || isLoading}
+        value={message}
+        onChange={handleChange}
+        onKeyDown={handleKeyPress}
+        placeholder={placeholder || "Message IntelliAssistant..."}
+        disabled={disabled}
+        maxRows={8}
+        minRows={1}
         sx={{
           '& .MuiOutlinedInput-root': {
-            backgroundColor: theme.palette.background.paper,
-            borderRadius: 2,
-            boxShadow: theme.palette.mode === 'dark' 
-              ? '0px 1px 4px rgba(0, 0, 0, 0.2)' 
-              : '0px 1px 3px rgba(0, 0, 0, 0.05)',
-            transition: 'all 0.2s',
+            backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(64, 65, 79, 0.9)' : 'white',
+            borderRadius: '12px',
+            padding: '10px 14px',
+            fontSize: '16px',
+            lineHeight: 1.5,
+            boxShadow: theme => theme.palette.mode === 'dark' 
+              ? '0 0 10px rgba(0,0,0,0.1)' 
+              : '0 0 10px rgba(0,0,0,0.05)',
+            border: theme => `1px solid ${
+              theme.palette.mode === 'dark' 
+                ? 'rgba(255,255,255,0.1)' 
+                : 'rgba(0,0,0,0.1)'
+            }`,
             '&.Mui-focused': {
-              boxShadow: `0 0 0 2px ${theme.palette.primary.main}30`,
+              boxShadow: '0 0 0 2px rgba(0, 166, 126, 0.3)',
+              border: '1px solid rgba(0, 166, 126, 0.5)',
             },
             '&:hover': {
-              borderColor: theme.palette.primary.main,
-            },
+              borderColor: theme => 
+                theme.palette.mode === 'dark' 
+                  ? 'rgba(255,255,255,0.2)' 
+                  : 'rgba(0,0,0,0.2)'
+            }
+          },
+          '& .MuiOutlinedInput-notchedOutline': {
+            border: 'none',
           },
         }}
         InputProps={{
-          sx: { 
-            fontSize: '0.95rem',
-            p: 1,
-          },
           endAdornment: (
-            <InputAdornment position="end">
-              {isLoading ? (
-                <CircularProgress size={24} color="primary" thickness={4} />
-              ) : (
-                <IconButton
-                  onClick={handleSendMessage}
-                  disabled={!message.trim() || disabled}
-                  color="primary"
-                  sx={{
-                    ml: 0.5,
-                    bgcolor: message.trim() 
-                      ? theme.palette.primary.main 
-                      : theme.palette.action.disabledBackground,
-                    color: message.trim() 
-                      ? theme.palette.primary.contrastText 
-                      : theme.palette.text.disabled,
-                    '&:hover': {
-                      bgcolor: message.trim() 
-                        ? theme.palette.primary.dark 
-                        : theme.palette.action.disabledBackground,
-                    },
-                    width: 36,
-                    height: 36,
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  <SendIcon fontSize="small" />
-                </IconButton>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              {isLoading && (
+                <CircularProgress 
+                  size={20} 
+                  thickness={4}
+                  sx={{ 
+                    mr: 1,
+                    color: message.trim() ? '#10a37f' : 'text.secondary'
+                  }} 
+                />
               )}
-            </InputAdornment>
+              <IconButton
+                onClick={handleSendMessage}
+                disabled={disabled || !message.trim()}
+                sx={{
+                  bgcolor: message.trim() ? '#10a37f' : 'transparent',
+                  color: message.trim() ? 'white' : 'text.secondary',
+                  '&:hover': {
+                    bgcolor: message.trim() ? '#0e906f' : 'rgba(0,0,0,0.04)',
+                  },
+                  transition: 'all 0.2s ease',
+                  p: 1,
+                }}
+              >
+                <SendIcon sx={{ fontSize: '1.2rem' }} />
+              </IconButton>
+            </Box>
           ),
         }}
       />
@@ -129,6 +139,7 @@ const ChatInput = ({
           justifyContent: 'flex-end',
           opacity: 0.8,
           mr: 0.5,
+          mt: -0.5,
         }}
       >
         <ModelSelector 
