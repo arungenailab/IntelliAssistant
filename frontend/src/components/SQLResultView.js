@@ -31,7 +31,7 @@ import {
 } from '@mui/icons-material';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import * as XLSX from 'xlsx';
+import * as ExcelJS from 'exceljs';
 
 /**
  * Component to display SQL query results
@@ -121,17 +121,48 @@ const SQLResultView = ({
   };
 
   // Download results as Excel
-  const downloadExcel = () => {
+  const downloadExcel = async () => {
     if (!results || results.length === 0) return;
     
     try {
-      // Create workbook and worksheet
-      const worksheet = XLSX.utils.json_to_sheet(results);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "SQL Results");
+      // Create a new workbook and worksheet
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('SQL Results');
+      
+      // Add headers
+      worksheet.columns = columns.map(column => ({
+        header: column,
+        key: column,
+        width: 20
+      }));
+      
+      // Add data rows
+      results.forEach(row => {
+        const rowData = {};
+        columns.forEach(column => {
+          rowData[column] = row[column]?.toString() || '';
+        });
+        worksheet.addRow(rowData);
+      });
+      
+      // Style the header row
+      worksheet.getRow(1).font = { bold: true };
       
       // Generate Excel file
-      XLSX.writeFile(workbook, `sql_results_${new Date().toISOString().split('T')[0]}.xlsx`);
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      
+      // Create a temporary download link and trigger click
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `sql_results_${new Date().toISOString().split('T')[0]}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      
+      // Clean up
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error("Error generating Excel file:", error);
       // Fallback to CSV if Excel generation fails
