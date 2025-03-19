@@ -43,3 +43,6 @@ yarn-error.log*
 data/conversations/
 temp_*
 *.log 
+
+# Sensitive configuration files
+config.py 
