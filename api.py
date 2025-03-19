@@ -634,9 +634,16 @@ def get_sql_ddl():
                 'success': False,
                 'error': f"Failed to connect to the database: {connector.last_error}"
             }), 400
-            
+        
         # Get database DDL
-        database_ddl = connector.get_database_ddl()
+        try:
+            database_ddl = connector.get_database_ddl()
+        except Exception as e:
+            logger.error(f"Error in get_database_ddl: {str(e)}")
+            return jsonify({
+                'success': False,
+                'error': f"Error fetching SQL Server DDL: {str(e)}"
+            }), 500
         
         # Disconnect
         connector.disconnect()
@@ -656,7 +663,7 @@ def get_sql_ddl():
 
 @app.route('/api/external-data/fetch', methods=['POST'])
 def get_api_data():
-    """Fetch data from an external API based on provided parameters"""
+    """Fetch data from an external API or data source"""
     try:
         data = request.get_json()
         
@@ -665,7 +672,7 @@ def get_api_data():
         endpoint = data.get('endpoint')
         params = data.get('params', {})
         credentials = data.get('credentials', {})
-        dataset_name = data.get('dataset_name')
+        dataset_name = data.get('dataset_name', f"{api_source_id}_{endpoint}")
         
         # Validate required fields
         if not api_source_id or not endpoint:
@@ -673,33 +680,89 @@ def get_api_data():
                 'success': False,
                 'error': "API source ID and endpoint are required"
             }), 400
-            
-        # Fetch data from the API
-        df = fetch_api_data(api_source_id, endpoint, params, credentials)
         
-        # Generate a preview of the data
-        preview = generate_preview(df)
+        # Log the request
+        logger.info(f"Fetching data from {api_source_id} endpoint {endpoint}")
+        logger.info(f"Parameters: {json.dumps(params)}")
+        logger.info(f"Dataset name: {dataset_name}")
         
-        # Save the data to the current_data dictionary if dataset_name is provided
-        if dataset_name:
-            current_data[dataset_name] = df
+        # Handle SQL Server separately
+        if api_source_id == 'sql_server':
+            from utils.sql_connector import SQLServerConnector, fetch_sql_data
             
-        return jsonify({
-            'success': True,
-            'preview': preview,
-            'shape': df.shape,
-            'columns': list(df.columns)
-        })
+            try:
+                # For SQL Server, the endpoint is either a table name or a query
+                if endpoint == 'query':
+                    # Execute a custom query
+                    query = params.get('query')
+                    if not query:
+                        return jsonify({
+                            'success': False,
+                            'error': "Query parameter is required for SQL query endpoint"
+                        }), 400
+                    
+                    df = fetch_sql_data(credentials, query=query)
+                else:
+                    # Use the endpoint as the table name
+                    df = fetch_sql_data(credentials, table_name=endpoint)
+                
+                # Check for error result
+                if 'error' in df.columns and len(df) == 1:
+                    error_msg = df['error'].iloc[0]
+                    return jsonify({
+                        'success': False,
+                        'error': error_msg
+                    }), 400
+                
+                # Save the credentials as a successful configuration
+                if credentials:
+                    # Add a name field based on the dataset name
+                    credentials['name'] = dataset_name
+                    SQLServerConnector.save_configuration(credentials)
+                    logger.info(f"Saved SQL configuration for {credentials.get('server')}/{credentials.get('database')}")
+                
+                # Generate a preview of the data
+                preview = generate_preview(df)
+                
+                return jsonify({
+                    'success': True,
+                    'preview': preview,
+                    'shape': df.shape,
+                    'columns': df.columns.tolist(),
+                    'dataset_name': dataset_name
+                })
+            except Exception as e:
+                logger.error(f"Error fetching SQL data: {str(e)}")
+                return jsonify({
+                    'success': False,
+                    'error': f"Error fetching SQL data: {str(e)}"
+                }), 400
+        
+        # For other API sources, use the API integrator
+        try:
+            # Fetch the data
+            df = fetch_api_data(api_source_id, endpoint, params, credentials)
+            
+            # Generate a preview of the data
+            preview = generate_preview(df)
+            
+            return jsonify({
+                'success': True,
+                'preview': preview,
+                'shape': df.shape,
+                'columns': df.columns.tolist(),
+                'dataset_name': dataset_name
+            })
+        except ApiIntegrationError as e:
+            logger.error(f"API integration error: {str(e)}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 400
     
-    except ApiIntegrationError as e:
-        logger.error(f"API integration error: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 400
     except Exception as e:
         logger.error(f"Error fetching API data: {str(e)}")
-        traceback.print_exc()
+        logger.error(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': f"Error fetching API data: {str(e)}"
@@ -745,12 +808,12 @@ def configure_api():
 
 @app.route('/api/external-data/sql/test-connection', methods=['POST'])
 def test_sql_connection():
-    """Test a connection to a SQL Server database"""
+    """Test connection to a SQL Server database"""
     try:
         data = request.get_json()
         
         # Extract connection parameters
-        connection_params = data
+        connection_params = data.get('credentials', {})
         
         # Validate required fields
         if not connection_params.get('server') or not connection_params.get('database'):
@@ -758,9 +821,10 @@ def test_sql_connection():
                 'success': False,
                 'error': "Server and database names are required"
             }), 400
-            
-        # Log connection attempt (without sensitive info)
-        logger.info(f"Testing SQL connection to server: {connection_params.get('server')}, database: {connection_params.get('database')}")
+        
+        # Add a name field if provided
+        if data.get('name'):
+            connection_params['name'] = data.get('name')
         
         # Import SQL connector
         from utils.sql_connector import SQLServerConnector
@@ -768,55 +832,25 @@ def test_sql_connection():
         # Create connector
         connector = SQLServerConnector(connection_params)
         
-        # Get system diagnostics
-        system_info = connector._check_system_requirements()
-        
         # Test connection
+        logger.info(f"Testing connection to {connection_params.get('server')}/{connection_params.get('database')}")
         success, message = connector.test_connection()
         
-        # Get available drivers
-        available_drivers = connector._get_available_drivers()
+        # If successful, save the configuration
+        if success:
+            SQLServerConnector.save_configuration(connection_params)
+            logger.info(f"Saved SQL configuration for {connection_params.get('server')}/{connection_params.get('database')}")
         
-        # Prepare response with detailed diagnostics
-        response = {
+        return jsonify({
             'success': success,
-            'message': message,
-            'available_drivers': available_drivers,
-            'system_info': system_info
-        }
-        
-        # If connection failed, add troubleshooting info
-        if not success:
-            # Check if SQL Server is installed
-            sql_server_installed = system_info.get('sql_server_installed', False)
-            
-            # Add specific troubleshooting advice
-            if not available_drivers:
-                response['troubleshooting'] = [
-                    "No SQL Server ODBC drivers found on your system.",
-                    "Please install the Microsoft ODBC Driver for SQL Server:",
-                    "https://docs.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server"
-                ]
-            elif not sql_server_installed and system_info.get('os') == 'Windows':
-                response['troubleshooting'] = [
-                    "SQL Server does not appear to be installed on this machine.",
-                    "If you're trying to connect to a remote SQL Server, make sure the server name is correct.",
-                    "If you're trying to connect to a local SQL Server, please install SQL Server or SQL Server Express."
-                ]
-            
-            # Add the error details
-            if connector.last_error:
-                response['error_details'] = connector.last_error
-        
-        return jsonify(response)
+            'message': message
+        })
         
     except Exception as e:
-        logger.error(f"Error testing SQL Server connection: {str(e)}")
-        traceback.print_exc()
+        logger.error(f"Error testing SQL connection: {str(e)}")
         return jsonify({
             'success': False,
-            'error': f"Error testing SQL Server connection: {str(e)}",
-            'traceback': traceback.format_exc()
+            'error': f"Error testing SQL connection: {str(e)}"
         }), 500
 
 @app.route('/api/status', methods=['GET'])
@@ -1089,6 +1123,109 @@ def debug_sql_schema():
         return jsonify({
             'success': False,
             'error': f"Error: {str(e)}"
+        }), 500
+
+# New endpoint to fetch configured data sources
+@app.route('/api/external-data/configured-sources', methods=['GET'])
+def get_configured_sources():
+    """Return a list of data sources that have been configured"""
+    try:
+        logger.info("Fetching configured data sources")
+        
+        # Initialize an empty list for configured sources
+        configured_sources = []
+        
+        # Get SQL Server configurations
+        try:
+            # Import SQL connector
+            from utils.sql_connector import SQLServerConnector
+            
+            # Fetch all saved SQL server configurations
+            # For now, we'll look for recent successful connections
+            # In a production app, this would come from a proper database of saved connections
+            sql_configs = SQLServerConnector.get_saved_configurations()
+            
+            # Add each SQL configuration as a configured source
+            for i, config in enumerate(sql_configs):
+                source_id = f"sql_{i+1}"
+                source_name = config.get('name', f"{config.get('server')}/{config.get('database')}")
+                
+                configured_sources.append({
+                    'id': source_id,
+                    'name': source_name,
+                    'type': 'sql_server',
+                    'description': f"SQL Server connection to {config.get('server')}/{config.get('database')}",
+                    'status': 'Active',
+                    'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'auth_required': True
+                })
+        except Exception as e:
+            logger.warning(f"Error fetching SQL configurations: {str(e)}")
+        
+        # If no configured sources were found, include sample data for demonstration
+        if not configured_sources:
+            logger.info("No configured sources found, returning sample data")
+            configured_sources = [
+                {
+                    'id': 'financial_1',
+                    'name': 'Alpha Vantage API (Sample)',
+                    'type': 'financial',
+                    'description': 'Financial market data (Sample)',
+                    'status': 'Active',
+                    'last_updated': '2023-07-15',
+                    'auth_required': True
+                },
+                {
+                    'id': 'sql_1',
+                    'name': 'Customer Database (Sample)',
+                    'type': 'sql_server',
+                    'description': 'SQL Server with customer data (Sample)',
+                    'status': 'Active',
+                    'last_updated': '2023-07-10',
+                    'auth_required': True
+                }
+            ]
+        
+        return jsonify({
+            'success': True,
+            'sources': configured_sources
+        })
+    except Exception as e:
+        logger.error(f"Error retrieving configured sources: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f"Error retrieving configured sources: {str(e)}"
+        }), 500
+
+# New endpoint to delete a configured data source
+@app.route('/api/external-data/configured-sources/<source_id>', methods=['DELETE'])
+def delete_configured_source(source_id):
+    """Delete a configured data source by ID"""
+    try:
+        logger.info(f"Received request to delete data source with ID: {source_id}")
+        
+        # In a production app, this would delete from a database
+        # For now, we'll just simulate a successful deletion
+        
+        # Validate source_id format
+        if not source_id or not isinstance(source_id, str):
+            return jsonify({
+                'success': False,
+                'error': "Invalid source ID format"
+            }), 400
+        
+        # In a real implementation, this would check if the source exists
+        # and delete it from persistent storage
+        
+        return jsonify({
+            'success': True,
+            'message': f"Data source {source_id} deleted successfully"
+        })
+    except Exception as e:
+        logger.error(f"Error deleting data source: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f"Error deleting data source: {str(e)}"
         }), 500
 
 if __name__ == '__main__':

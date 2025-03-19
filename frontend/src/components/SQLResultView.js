@@ -315,27 +315,87 @@ const SQLResultView = ({
               </Tooltip>
             </ButtonGroup>
           </Box>
-          <TableContainer sx={{ maxHeight: 400 }}>
+          <TableContainer sx={{ maxHeight: 400, overflowX: 'auto' }}>
             <Table stickyHeader size="small" aria-label="SQL query results">
               <TableHead>
                 <TableRow>
-                  {columns.map((column) => (
-                    <TableCell key={column} sx={{ fontWeight: 'bold', py: 1 }}>
-                      {column}
-                    </TableCell>
-                  ))}
+                  {columns.map((column) => {
+                    // Format column header for display - handle table prefixes
+                    const displayColumn = column.includes('.') ? column.split('.').pop() : column;
+                    
+                    return (
+                      <TableCell 
+                        key={column} 
+                        sx={{ 
+                          fontWeight: 'bold', 
+                          py: 1,
+                          px: 2,
+                          bgcolor: 'background.paper',
+                          minWidth: displayColumn.length > 15 ? 180 : 120, // Set wider columns for long column names
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          borderRight: '1px solid rgba(224, 224, 224, 0.4)',
+                          '&:last-child': {
+                            borderRight: 'none'
+                          }
+                        }}
+                      >
+                        <Tooltip title={column} placement="top" arrow>
+                          <Box component="span">
+                            {displayColumn}
+                          </Box>
+                        </Tooltip>
+                      </TableCell>
+                    );
+                  })}
                 </TableRow>
               </TableHead>
               <TableBody>
                 {results
                   .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                   .map((row, index) => (
-                    <TableRow key={index} hover>
-                      {columns.map((column) => (
-                        <TableCell key={`${index}-${column}`} sx={{ py: 1 }}>
-                          {row[column]?.toString() || ''}
-                        </TableCell>
-                      ))}
+                    <TableRow 
+                      key={index} 
+                      hover
+                      sx={{
+                        '&:nth-of-type(odd)': {
+                          backgroundColor: 'rgba(0, 0, 0, 0.02)',
+                        },
+                      }}
+                    >
+                      {columns.map((column) => {
+                        // Determine content type for proper alignment
+                        const cellValue = row[column]?.toString() || '';
+                        const isNumber = !isNaN(cellValue) && cellValue.trim() !== '';
+                        const isDate = /^\d{4}-\d{2}-\d{2}/.test(cellValue);
+                        
+                        return (
+                          <TableCell 
+                            key={`${index}-${column}`} 
+                            align={isNumber && !isDate ? 'right' : 'left'}
+                            sx={{ 
+                              py: 1, 
+                              px: 2,
+                              minWidth: column.length > 15 ? 180 : 120,
+                              maxWidth: 300,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              borderRight: '1px solid rgba(224, 224, 224, 0.4)',
+                              '&:last-child': {
+                                borderRight: 'none'
+                              }
+                            }}
+                          >
+                            <Tooltip title={cellValue} arrow placement="top">
+                              <Box component="span" sx={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {cellValue}
+                              </Box>
+                            </Tooltip>
+                          </TableCell>
+                        );
+                      })}
                     </TableRow>
                   ))}
                 {emptyRows > 0 && (

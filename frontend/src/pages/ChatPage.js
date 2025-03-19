@@ -881,7 +881,7 @@ Please type the number or name of the dataset you want to use.`,
         return;
       }
     }
-    
+
     // Create a temporary loading message
     const loadingMessage = {
       id: Date.now() + 1,

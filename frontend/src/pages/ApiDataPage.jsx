@@ -17,15 +17,31 @@ import {
   TableHead,
   TableRow,
   Link,
-  Tooltip
+  Tooltip,
+  Tabs,
+  Tab,
+  Chip
 } from '@mui/material';
-import { Database, RefreshCw, Settings, ArrowRight, AlertCircle, Wifi, WifiOff, Bug } from 'lucide-react';
+import { 
+  Database, 
+  RefreshCw, 
+  Settings, 
+  ArrowRight, 
+  AlertCircle, 
+  Wifi, 
+  WifiOff, 
+  Bug,
+  Plus,
+  List
+} from 'lucide-react';
 import SQLServerForm from '../components/SQLServerForm';
 import { getApiBaseUrl, checkApiStatus, debugApiConnection } from '../api/chatApi';
 
 export default function ApiDataPage() {
   const [apiSources, setApiSources] = useState([]);
+  const [savedDatasets, setSavedDatasets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState(0);
   const [selectedSource, setSelectedSource] = useState(null);
   const [selectedEndpoint, setSelectedEndpoint] = useState('');
   const [apiParams, setApiParams] = useState({});
@@ -45,6 +61,21 @@ export default function ApiDataPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   
+  // Handle tab change
+  const handleTabChange = (event, newValue) => {
+    // Clear any existing errors when switching tabs
+    setError(null);
+    setActiveTab(newValue);
+    
+    if (newValue === 0) {
+      // When switching to Add Data Source tab
+      fetchApiSources();
+    } else if (newValue === 1) {
+      // When switching to View Configured Sources tab
+      fetchConfiguredSources();
+    }
+  };
+
   const checkApiServerStatus = async () => {
     try {
       setLoading(true);
@@ -57,6 +88,9 @@ export default function ApiDataPage() {
       
       if (status.success) {
         await fetchApiSources();
+        if (activeTab === 1) {
+          await fetchConfiguredSources();
+        }
       }
     } catch (err) {
       console.error('Error checking API server status:', err);
@@ -108,6 +142,50 @@ export default function ApiDataPage() {
     } catch (err) {
       console.error('Error fetching API sources:', err);
       setError(`Error connecting to server: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchConfiguredSources = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      console.log(`Fetching configured data sources from ${apiBaseUrl}/external-data/configured-sources`);
+      
+      const response = await fetch(`${apiBaseUrl}/external-data/configured-sources`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // Include cookies for CORS requests
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server responded with status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log('Configured sources fetched successfully:', data.sources);
+        // Check if sources array exists
+        if (!data.sources || !Array.isArray(data.sources)) {
+          console.warn('No configured sources array in response:', data);
+          setSavedDatasets([]);
+          return;
+        }
+        
+        setSavedDatasets(data.sources || []);
+      } else {
+        throw new Error(data.error || 'Failed to fetch configured data sources');
+      }
+    } catch (err) {
+      console.error('Error fetching configured data sources:', err);
+      setError(`Error connecting to server: Failed to fetch configured data sources`);
+      // Set empty array to avoid undefined errors
+      setSavedDatasets([]);
     } finally {
       setLoading(false);
     }
@@ -225,6 +303,10 @@ export default function ApiDataPage() {
       if (data.success) {
         setPreviewData(data);
         alert(`Data fetched successfully and saved as "${datasetName || `${apiSourceId}_${apiEndpoint}`}"`);
+        // After successfully fetching data, refresh the saved datasets list
+        if (activeTab === 1) {
+          fetchConfiguredSources();
+        }
       } else {
         setError(data.error || 'Failed to fetch data');
       }
@@ -560,6 +642,181 @@ export default function ApiDataPage() {
     );
   };
 
+  const renderConfiguredSources = () => {
+    if (loading) return <Typography align="center" sx={{ py: 4 }}>Loading configured data sources...</Typography>;
+    
+    // Show error state with retry button if there's an error
+    if (error && activeTab === 1) {
+      return (
+        <Box sx={{ textAlign: 'center', py: 4 }}>
+          <AlertCircle style={{ height: '40px', width: '40px', color: '#d32f2f', margin: '0 auto 16px' }} />
+          <Typography color="error" gutterBottom>
+            {error}
+          </Typography>
+          <Button 
+            variant="contained" 
+            color="primary"
+            onClick={fetchConfiguredSources} 
+            sx={{ mt: 2 }}
+            startIcon={<RefreshCw style={{ width: '16px', height: '16px' }} />}
+          >
+            Retry
+          </Button>
+        </Box>
+      );
+    }
+    
+    if (savedDatasets.length === 0) {
+      return (
+        <Box sx={{ textAlign: 'center', py: 4 }}>
+          <AlertCircle style={{ height: '40px', width: '40px', color: '#888', margin: '0 auto 16px' }} />
+          <Typography color="textSecondary">No configured data sources available</Typography>
+          <Button 
+            variant="outlined" 
+            onClick={() => {
+              setActiveTab(0);
+              fetchApiSources();
+            }} 
+            sx={{ mt: 2 }}
+            startIcon={<Plus style={{ width: '16px', height: '16px' }} />}
+          >
+            Configure New Data Source
+          </Button>
+        </Box>
+      );
+    }
+    
+    return (
+      <TableContainer component={Paper} variant="outlined" sx={{ mt: 3 }}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ fontWeight: 'bold' }}>Name</TableCell>
+              <TableCell sx={{ fontWeight: 'bold' }}>Type</TableCell>
+              <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
+              <TableCell sx={{ fontWeight: 'bold' }}>Last Updated</TableCell>
+              <TableCell sx={{ fontWeight: 'bold' }}>Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {savedDatasets.map((source) => (
+              <TableRow key={source.id} hover>
+                <TableCell>{source.name}</TableCell>
+                <TableCell>
+                  <Chip 
+                    label={source.type} 
+                    size="small" 
+                    color="primary" 
+                    variant="outlined"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Chip 
+                    label={source.status} 
+                    size="small" 
+                    color={source.status === "Active" ? "success" : "warning"}
+                    variant="outlined"
+                  />
+                </TableCell>
+                <TableCell>
+                  {source.last_updated ? new Date(source.last_updated).toLocaleString() : 'Never'}
+                </TableCell>
+                <TableCell>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Button 
+                      variant="outlined" 
+                      size="small" 
+                      onClick={() => {
+                        setActiveTab(0);
+                        // Find and select the matching source from apiSources
+                        const sourceType = apiSources.find(s => s.id === source.type);
+                        if (sourceType) {
+                          handleSourceSelect(sourceType);
+                        }
+                      }}
+                    >
+                      Configure
+                    </Button>
+                    <Button 
+                      variant="outlined" 
+                      size="small"
+                      color="error"
+                      onClick={() => {
+                        // Handle source deletion
+                        if (window.confirm(`Are you sure you want to delete ${source.name}?`)) {
+                          // Call deletion API
+                          deleteConfiguredSource(source.id);
+                        }
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </Box>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    );
+  };
+
+  // Add a function to delete a configured source
+  const deleteConfiguredSource = async (sourceId) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      console.log(`Deleting data source with ID: ${sourceId}`);
+      
+      const response = await fetch(`${apiBaseUrl}/external-data/configured-sources/${sourceId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // Include cookies for CORS requests
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server responded with status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log(`Data source ${sourceId} deleted successfully`);
+        // Refresh the list of configured sources
+        fetchConfiguredSources();
+      } else {
+        throw new Error(data.error || `Failed to delete data source ${sourceId}`);
+      }
+    } catch (err) {
+      console.error(`Error deleting data source ${sourceId}:`, err);
+      setError(`Error deleting data source: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update the refresh button header
+  const renderConfiguredSourcesHeader = () => {
+    if (activeTab !== 1) return null;
+    
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<RefreshCw style={{ width: '16px', height: '16px' }} />}
+          onClick={fetchConfiguredSources}
+          disabled={loading}
+        >
+          Refresh Sources
+        </Button>
+      </Box>
+    );
+  };
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       <Box>
@@ -621,7 +878,8 @@ export default function ApiDataPage() {
         </Box>
       </Box>
       
-      {error && (
+      {/* Only show the error Alert for API server connection errors, not dataset fetch errors */}
+      {error && error.includes('Cannot connect to API server') && (
         <Alert 
           severity="error"
           icon={<AlertCircle style={{ height: '20px', width: '20px' }} />}
@@ -655,9 +913,47 @@ export default function ApiDataPage() {
         </Alert>
       )}
       
-      {renderSourceList()}
-      {renderConfigSection()}
-      {renderPreview()}
+      {/* Tabs */}
+      <Paper sx={{ borderRadius: 1 }}>
+        <Tabs
+          value={activeTab}
+          onChange={handleTabChange}
+          variant="fullWidth"
+          indicatorColor="primary"
+          textColor="primary"
+          aria-label="API data tabs"
+          sx={{ mb: 2 }}
+        >
+          <Tab 
+            icon={<Plus style={{ height: '16px', width: '16px', marginRight: '8px' }} />} 
+            label="Add Data Source" 
+            iconPosition="start"
+          />
+          <Tab 
+            icon={<List style={{ height: '16px', width: '16px', marginRight: '8px' }} />} 
+            label="View Configured Sources" 
+            iconPosition="start"
+          />
+        </Tabs>
+      
+        {/* Tab content */}
+        <Box sx={{ p: 2 }}>
+          {activeTab === 0 && (
+            <>
+              {renderSourceList()}
+              {renderConfigSection()}
+              {renderPreview()}
+            </>
+          )}
+          
+          {activeTab === 1 && (
+            <>
+              {renderConfiguredSourcesHeader()}
+              {renderConfiguredSources()}
+            </>
+          )}
+        </Box>
+      </Paper>
     </Box>
   );
 } 

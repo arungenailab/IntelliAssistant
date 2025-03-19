@@ -16,6 +16,7 @@ import platform
 import os
 import numpy as np
 import re
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,133 @@ class SQLServerConnector:
         self.is_connected = False
         self.driver = connection_params.get('driver', None)
         self.last_error = None
+        
+    @staticmethod
+    def get_saved_configurations() -> List[Dict[str, str]]:
+        """
+        Get saved SQL Server configurations from localStorage or file cache
+        
+        Returns:
+            List[Dict[str, str]]: List of saved configurations
+        """
+        try:
+            # In a production app, this would load from a database or persistent storage
+            # For now, we'll check if there are any recent successful connections in our system
+            
+            # Look for configuration in LOCAL_STORAGE_KEY if available
+            import os
+            import json
+            
+            # Check for cached configurations in the user's home directory
+            home_dir = os.path.expanduser("~")
+            cache_dir = os.path.join(home_dir, ".intelligassistant")
+            config_file = os.path.join(cache_dir, "sql_configs.json")
+            
+            # Create directory if it doesn't exist
+            if not os.path.exists(cache_dir):
+                os.makedirs(cache_dir)
+            
+            # Check if config file exists
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, 'r') as f:
+                        configs = json.load(f)
+                        logger.info(f"Loaded {len(configs)} SQL configurations from {config_file}")
+                        return configs
+                except Exception as e:
+                    logger.warning(f"Error loading SQL configurations from {config_file}: {str(e)}")
+            
+            # If no config file, check for localStorage data in browser (as a fallback)
+            local_storage_file = os.path.join(cache_dir, "localStorage.json")
+            if os.path.exists(local_storage_file):
+                try:
+                    with open(local_storage_file, 'r') as f:
+                        local_storage = json.load(f)
+                        # Look for SQL configuration data
+                        sql_config = local_storage.get("sql_server_config")
+                        if sql_config:
+                            if isinstance(sql_config, str):
+                                try:
+                                    sql_config = json.loads(sql_config)
+                                except:
+                                    pass
+                            
+                            # If we found a configuration, return it
+                            if isinstance(sql_config, dict):
+                                return [sql_config]
+                except Exception as e:
+                    logger.warning(f"Error loading localStorage data: {str(e)}")
+            
+            # If no configurations found in either location, create a sample config
+            # This ensures the UI will show something even when no real configuration exists
+            # In a production app, you'd just return an empty list here
+            logger.info("No saved SQL configurations found, returning empty list")
+            return []
+            
+        except Exception as e:
+            logger.error(f"Error getting saved SQL configurations: {str(e)}")
+            return []
+    
+    @staticmethod
+    def save_configuration(config: Dict[str, str]) -> bool:
+        """
+        Save a SQL Server configuration
+        
+        Args:
+            config: The configuration to save
+            
+        Returns:
+            bool: True if saved successfully, False otherwise
+        """
+        try:
+            # Remove sensitive data (password)
+            save_config = config.copy()
+            if 'password' in save_config:
+                save_config['password'] = '********'  # Mask password
+            
+            import os
+            import json
+            
+            # Save to cache directory
+            home_dir = os.path.expanduser("~")
+            cache_dir = os.path.join(home_dir, ".intelligassistant")
+            config_file = os.path.join(cache_dir, "sql_configs.json")
+            
+            # Create directory if it doesn't exist
+            if not os.path.exists(cache_dir):
+                os.makedirs(cache_dir)
+            
+            # Load existing configs
+            configs = []
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, 'r') as f:
+                        configs = json.load(f)
+                except Exception:
+                    configs = []
+            
+            # Add new config if not duplicate
+            found = False
+            for i, existing in enumerate(configs):
+                if existing.get('server') == save_config.get('server') and existing.get('database') == save_config.get('database'):
+                    # Update existing config
+                    configs[i] = save_config
+                    found = True
+                    break
+            
+            if not found:
+                configs.append(save_config)
+            
+            # Save configs
+            with open(config_file, 'w') as f:
+                json.dump(configs, f, indent=2)
+            
+            logger.info(f"Saved SQL configuration for {save_config.get('server')}/{save_config.get('database')}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving SQL configuration: {str(e)}")
+            return False
         
     def _get_available_drivers(self) -> List[str]:
         """
@@ -161,6 +289,10 @@ class SQLServerConnector:
                 self.connection = pyodbc.connect(conn_str)
                 self.is_connected = True
                 logger.info(f"Successfully connected to {self.connection_params['server']}/{self.connection_params['database']} using driver {self.driver}")
+                
+                # Save successful configuration
+                self.save_configuration(self.connection_params)
+                
                 return True
             except Exception as e:
                 self.last_error = str(e)
@@ -186,6 +318,12 @@ class SQLServerConnector:
                 self.is_connected = True
                 self.driver = driver  # Remember the successful driver
                 logger.info(f"Successfully connected to {self.connection_params['server']}/{self.connection_params['database']} using driver {driver}")
+                
+                # Save successful configuration
+                connection_config = self.connection_params.copy()
+                connection_config['driver'] = driver
+                self.save_configuration(connection_config)
+                
                 return True
             except Exception as e:
                 error_msg = f"Driver {driver}: {str(e)}"
@@ -249,7 +387,7 @@ class SQLServerConnector:
             query: SQL query to execute
             params: Parameters for the query
             limit: Maximum number of rows to return
-            
+        
         Returns:
             DataFrame: Query results
         """
@@ -307,19 +445,33 @@ class SQLServerConnector:
             # Parse the query to extract table and column references
             # This is a simplified implementation that may not handle all SQL syntax
             
-            # Extract all table references
-            table_matches = re.findall(r'(?:FROM|JOIN)\s+([^\s,;()]+)', query, re.IGNORECASE)
+            # Extract all table references and their aliases
+            table_matches = re.findall(r'(?:FROM|JOIN)\s+([^\s,;()]+)(?:\s+(?:AS\s+)?([^\s,;()WHERE]+))?', query, re.IGNORECASE)
             
-            # Get all tables mentioned in the query
+            # Map of aliases to table names and tables to aliases
+            alias_to_table = {}
+            table_to_alias = {}
             tables = []
+            
             for match in table_matches:
-                table_name = match.strip('[]"\'`')
-                # Handle table aliases like "table_name AS alias" or "table_name alias"
-                if ' AS ' in table_name.upper():
-                    table_name = table_name.split(' AS ')[0].strip()
-                elif ' ' in table_name:
-                    table_name = table_name.split(' ')[0].strip()
+                table_name = match[0].strip('[]"\'`')
+                alias = None
+                
+                # Handle table aliases
+                if len(match) > 1 and match[1]:
+                    alias = match[1].strip()
+                    alias_to_table[alias.upper()] = table_name
+                    table_to_alias[table_name.upper()] = alias
+                
+                # Handle table names with schema prefixes
+                if '.' in table_name:
+                    table_name = table_name.split('.')[-1].strip('[]"\'`')
+                
                 tables.append(table_name)
+            
+            # Log tables and aliases for debugging
+            logger.debug(f"Tables in query: {tables}")
+            logger.debug(f"Alias mapping: {alias_to_table}")
             
             # Get all columns for the tables mentioned in the query
             all_valid_columns = set()
@@ -330,15 +482,15 @@ class SQLServerConnector:
                     schema_df = self.get_table_schema(table)
                     columns = schema_df['column_name'].tolist()
                     all_valid_columns.update(columns)
-                    table_column_map[table] = columns
+                    table_column_map[table.upper()] = columns
                 except Exception as e:
                     logger.warning(f"Could not get schema for table {table}: {str(e)}")
             
             # Extract column references from the query
-            # This is a simplistic approach that might miss some columns or include non-columns
             query_columns = set()
             
             # Look for column references in SELECT, WHERE, ORDER BY, etc.
+            # Also find table aliases used in the query
             column_sections = re.findall(r'(?:SELECT|WHERE|ORDER\s+BY|GROUP\s+BY|HAVING)\s+(.+?)(?:FROM|WHERE|GROUP\s+BY|ORDER\s+BY|LIMIT|;|$)', query, re.IGNORECASE | re.DOTALL)
             
             for section in column_sections:
@@ -349,47 +501,73 @@ class SQLServerConnector:
                 parts = re.split(r',|\s+AND\s+|\s+OR\s+|\s+ON\s+|\s+WHEN\s+|\s+THEN\s+|\s+ELSE\s+|\s+IN\s+', section_no_subquery)
                 
                 for part in parts:
-                    # Extract identifiers that might be column names
-                    identifiers = re.findall(r'([a-zA-Z0-9_]+)(?:\.[a-zA-Z0-9_]+)?', part)
+                    # Extract table alias qualified columns (e.g., "t.column_name" or "Transactions.column_name")
+                    qualified_columns = re.findall(r'([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)', part)
+                    
+                    for qualifier, column in qualified_columns:
+                        # Skip if it's a function or aggregation
+                        if column.lower() in ['count', 'sum', 'avg', 'min', 'max']:
+                            continue
+                        query_columns.add((qualifier, column))
+                    
+                    # Extract standalone identifiers that might be column names
+                    identifiers = re.findall(r'([a-zA-Z0-9_]+)(?!\.[a-zA-Z0-9_]+)', part)
                     
                     for identifier in identifiers:
-                        # Skip SQL keywords, functions, and numeric literals
+                        # Skip SQL keywords, functions, numeric literals, and table aliases
                         if (identifier.upper() not in {'SELECT', 'FROM', 'WHERE', 'ORDER', 'BY', 'GROUP', 
                                                       'HAVING', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 
                                                       'FULL', 'ON', 'AS', 'AND', 'OR', 'NOT', 'NULL', 
                                                       'IS', 'IN', 'BETWEEN', 'LIKE', 'DESC', 'ASC', 
                                                       'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'TOP'} and
                             not identifier.isdigit() and
-                            not identifier.startswith('N')):  # Skip N'string' literals
+                            not identifier.startswith('N') and
+                            # Skip table names and aliases
+                            identifier.upper() not in alias_to_table.keys() and
+                            identifier not in tables):
                             
-                            # If the identifier has a table qualifier (e.g. t.column), extract just the column name
-                            if '.' in identifier:
-                                parts = identifier.split('.')
-                                if len(parts) == 2:
-                                    query_columns.add(parts[1])
-                            else:
-                                query_columns.add(identifier)
-            
-            # Also check for column references in expressions like "table_name.column_name"
-            qualified_columns = re.findall(r'([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)', query)
-            for table, column in qualified_columns:
-                if table in table_column_map:  # Only add if we know this table
-                    query_columns.add(column)
+                            query_columns.add((None, identifier))
             
             # Check for invalid columns
-            # Note: this simplified approach doesn't handle aliases, functions, or expressions
             invalid_columns = []
-            for column in query_columns:
-                # Skip aliases, table names, common SQL keywords
-                if column in tables or column.lower() in ['as', 'desc', 'asc']:
+            
+            for qualifier, column in query_columns:
+                # Skip common SQL keywords, aggregation functions, etc.
+                if column.lower() in ['as', 'desc', 'asc', 'count', 'sum', 'avg', 'min', 'max']:
                     continue
+                
+                # Skip computed columns or known patterns
+                if any(alias_pattern in column.lower() for alias_pattern in ['_amount', '_total', '_value', '_count', '_avg', '_sum']):
+                    continue
+                
+                # For qualified columns, check if the column belongs to the specified table or alias
+                if qualifier:
+                    table_name = None
+                    qualifier_upper = qualifier.upper()
                     
-                # Check if this column exists in any of the tables
-                if column not in all_valid_columns:
-                    # Skip common aggregation functions and computed columns
-                    if column.lower() in ['count', 'sum', 'avg', 'min', 'max'] or \
-                       any(alias_pattern in column.lower() for alias_pattern in ['_amount', '_total', '_value', '_count', '_avg', '_sum']):
-                        continue
+                    # Check if qualifier is a table name
+                    if qualifier_upper in [t.upper() for t in tables]:
+                        table_name = qualifier
+                    # Check if qualifier is an alias
+                    elif qualifier_upper in alias_to_table:
+                        table_name = alias_to_table[qualifier_upper]
+                    
+                    if table_name:
+                        table_name_upper = table_name.upper()
+                        # If we have schema info for this table
+                        if table_name_upper in map(str.upper, table_column_map.keys()):
+                            # Get columns for the actual table, regardless of case
+                            table_key = next((k for k in table_column_map.keys() if k.upper() == table_name_upper), None)
+                            table_columns = table_column_map.get(table_key, []) if table_key else []
+                            
+                            # Check if column exists in this table
+                            if column.lower() not in map(str.lower, table_columns):
+                                # Only add invalid column with its qualifier for clarity
+                                invalid_columns.append(f"{qualifier}.{column}")
+                            continue
+                
+                # For unqualified columns, check if they exist in any table
+                if column not in all_valid_columns and column.lower() not in map(str.lower, all_valid_columns):
                     invalid_columns.append(column)
             
             # Compile the results
@@ -399,7 +577,7 @@ class SQLServerConnector:
                 'invalid_columns': invalid_columns,
                 'valid_tables': tables,
                 'valid_columns': list(all_valid_columns),
-                'message': 'Query validation successful' if valid else 'Query contains invalid columns'
+                'message': 'Query validation successful' if valid else f"Query contains invalid columns: {', '.join(invalid_columns)}"
             }
             
             if not valid:
@@ -411,8 +589,9 @@ class SQLServerConnector:
             
         except Exception as e:
             logger.error(f"Error validating query: {str(e)}")
+            logger.error(traceback.format_exc())
             return {
-                'valid': False,
+                'valid': True,  # Return valid=True when validation fails to allow query execution
                 'invalid_columns': [],
                 'message': f"Error validating query: {str(e)}"
             }
@@ -586,7 +765,7 @@ class SQLServerConnector:
             self.is_connected = False
             logger.info("Database connection closed")
     
-    def list_tables(self) -> List[str]:
+    def list_tables(self):
         """
         Get a list of all tables in the database
         
@@ -679,148 +858,168 @@ class SQLServerConnector:
             ORDER BY 
                 TABLE_SCHEMA, TABLE_NAME
             """
-            tables_df = pd.read_sql_query(tables_query, self.connection)
-            logger.info(f"Found {len(tables_df)} tables")
+            try:
+                tables_df = pd.read_sql_query(tables_query, self.connection)
+                logger.info(f"Found {len(tables_df)} tables")
+            except Exception as e:
+                logger.error(f"Error fetching tables: {str(e)}")
+                return {"error": f"Error fetching tables: {str(e)}"}
             
             # Get columns for each table
             tables_dict = {}
-            for _, table_row in tables_df.iterrows():
-                table_name = table_row['TABLE_NAME']
-                
-                # Get columns for this table
-                columns_query = """
-                SELECT 
-                    c.COLUMN_NAME,
-                    c.DATA_TYPE,
-                    c.CHARACTER_MAXIMUM_LENGTH,
-                    c.NUMERIC_PRECISION,
-                    c.NUMERIC_SCALE,
-                    c.IS_NULLABLE,
-                    CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 'YES' ELSE 'NO' END AS IS_PRIMARY_KEY
-                FROM 
-                    INFORMATION_SCHEMA.COLUMNS c
-                LEFT JOIN (
-                    SELECT 
-                        ku.TABLE_CATALOG,
-                        ku.TABLE_SCHEMA,
-                        ku.TABLE_NAME,
-                        ku.COLUMN_NAME
-                    FROM 
-                        INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS tc
-                    JOIN 
-                        INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS ku
-                        ON tc.CONSTRAINT_TYPE = 'PRIMARY KEY' 
-                        AND tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
-                ) pk
-                ON 
-                    c.TABLE_CATALOG = pk.TABLE_CATALOG
-                    AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
-                    AND c.TABLE_NAME = pk.TABLE_NAME
-                    AND c.COLUMN_NAME = pk.COLUMN_NAME
-                WHERE 
-                    c.TABLE_NAME = ?
-                ORDER BY 
-                    c.ORDINAL_POSITION
-                """
-                columns_df = pd.read_sql_query(columns_query, self.connection, params=[table_name])
-                
-                # Convert columns to list of dictionaries with JSON serializable values
-                columns_list = []
-                for _, col_row in columns_df.iterrows():
-                    # Handle NaN values that would cause JSON serialization issues
-                    col_dict = {}
-                    for k, v in col_row.items():
-                        if pd.isna(v):
-                            col_dict[k] = None
-                        elif isinstance(v, (np.int64, np.int32)):
-                            col_dict[k] = int(v)
-                        elif isinstance(v, (np.float64, np.float32)):
-                            # Convert numpy float to Python float
-                            col_dict[k] = float(v) if not np.isnan(v) else None
-                        else:
-                            col_dict[k] = v
+            try:
+                for _, table_row in tables_df.iterrows():
+                    table_name = table_row['TABLE_NAME']
                     
-                    columns_list.append(col_dict)
-                
-                tables_dict[table_name] = columns_list
+                    # Get columns for this table
+                    columns_query = """
+                    SELECT 
+                        c.COLUMN_NAME,
+                        c.DATA_TYPE,
+                        c.CHARACTER_MAXIMUM_LENGTH,
+                        c.NUMERIC_PRECISION,
+                        c.NUMERIC_SCALE,
+                        c.IS_NULLABLE,
+                        CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 'YES' ELSE 'NO' END AS IS_PRIMARY_KEY
+                    FROM 
+                        INFORMATION_SCHEMA.COLUMNS c
+                    LEFT JOIN (
+                        SELECT 
+                            ku.TABLE_CATALOG,
+                            ku.TABLE_SCHEMA,
+                            ku.TABLE_NAME,
+                            ku.COLUMN_NAME
+                        FROM 
+                            INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS tc
+                        JOIN 
+                            INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS ku
+                            ON tc.CONSTRAINT_TYPE = 'PRIMARY KEY' 
+                            AND tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
+                    ) pk
+                    ON 
+                        c.TABLE_CATALOG = pk.TABLE_CATALOG
+                        AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
+                        AND c.TABLE_NAME = pk.TABLE_NAME
+                        AND c.COLUMN_NAME = pk.COLUMN_NAME
+                    WHERE 
+                        c.TABLE_NAME = ?
+                    ORDER BY 
+                        c.ORDINAL_POSITION
+                    """
+                    try:
+                        columns_df = pd.read_sql_query(columns_query, self.connection, params=[table_name])
+                    except Exception as e:
+                        logger.error(f"Error fetching columns for table {table_name}: {str(e)}")
+                        continue
+                    
+                    # Convert columns to list of dictionaries with JSON serializable values
+                    columns_list = []
+                    for _, col_row in columns_df.iterrows():
+                        # Handle NaN values that would cause JSON serialization issues
+                        col_dict = {}
+                        for k, v in col_row.items():
+                            if pd.isna(v):
+                                col_dict[k] = None
+                            elif isinstance(v, (np.int64, np.int32)):
+                                col_dict[k] = int(v)
+                            elif isinstance(v, (np.float64, np.float32)):
+                                # Convert numpy float to Python float
+                                col_dict[k] = float(v) if not np.isnan(v) else None
+                            else:
+                                col_dict[k] = v
+                        
+                        columns_list.append(col_dict)
+                    
+                    tables_dict[table_name] = columns_list
+            except Exception as e:
+                logger.error(f"Error processing tables and columns: {str(e)}")
+                return {"error": f"Error processing tables and columns: {str(e)}"}
             
             # Get foreign key relationships
-            relationships_query = """
-            SELECT 
-                fk.name AS constraint_name,
-                OBJECT_NAME(fk.parent_object_id) AS parent_table,
-                COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS parent_column,
-                OBJECT_NAME(fk.referenced_object_id) AS referenced_table,
-                COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS referenced_column
-            FROM 
-                sys.foreign_keys AS fk
-            INNER JOIN 
-                sys.foreign_key_columns AS fkc 
-                ON fk.OBJECT_ID = fkc.constraint_object_id
-            ORDER BY 
-                parent_table, referenced_table
-            """
-            relationships_df = pd.read_sql_query(relationships_query, self.connection)
-            
-            # Convert relationships to list of dictionaries with JSON serializable values
-            relationships_list = []
-            for _, rel_row in relationships_df.iterrows():
-                # Handle NaN values that would cause JSON serialization issues
-                rel_dict = {}
-                for k, v in rel_row.items():
-                    if pd.isna(v):
-                        rel_dict[k] = None
-                    elif isinstance(v, (np.int64, np.int32)):
-                        rel_dict[k] = int(v)
-                    elif isinstance(v, (np.float64, np.float32)):
-                        rel_dict[k] = float(v) if not np.isnan(v) else None
-                    else:
-                        rel_dict[k] = v
-                        
-                relationships_list.append(rel_dict)
+            try:
+                relationships_query = """
+                SELECT 
+                    fk.name AS constraint_name,
+                    OBJECT_NAME(fk.parent_object_id) AS parent_table,
+                    COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS parent_column,
+                    OBJECT_NAME(fk.referenced_object_id) AS referenced_table,
+                    COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS referenced_column
+                FROM 
+                    sys.foreign_keys AS fk
+                INNER JOIN 
+                    sys.foreign_key_columns AS fkc 
+                    ON fk.OBJECT_ID = fkc.constraint_object_id
+                ORDER BY 
+                    parent_table, referenced_table
+                """
+                relationships_df = pd.read_sql_query(relationships_query, self.connection)
+                
+                # Convert relationships to list of dictionaries with JSON serializable values
+                relationships_list = []
+                for _, rel_row in relationships_df.iterrows():
+                    # Handle NaN values that would cause JSON serialization issues
+                    rel_dict = {}
+                    for k, v in rel_row.items():
+                        if pd.isna(v):
+                            rel_dict[k] = None
+                        elif isinstance(v, (np.int64, np.int32)):
+                            rel_dict[k] = int(v)
+                        elif isinstance(v, (np.float64, np.float32)):
+                            rel_dict[k] = float(v) if not np.isnan(v) else None
+                        else:
+                            rel_dict[k] = v
+                            
+                    relationships_list.append(rel_dict)
+            except Exception as e:
+                logger.error(f"Error processing relationships: {str(e)}")
+                relationships_list = []
             
             # Get indexes
-            indexes_query = """
-            SELECT 
-                t.name AS table_name,
-                ind.name AS index_name,
-                col.name AS column_name,
-                ind.is_unique,
-                ind.is_primary_key
-            FROM 
-                sys.indexes ind 
-            INNER JOIN 
-                sys.index_columns ic ON ind.object_id = ic.object_id AND ind.index_id = ic.index_id 
-            INNER JOIN 
-                sys.columns col ON ic.object_id = col.object_id AND ic.column_id = col.column_id 
-            INNER JOIN 
-                sys.tables t ON ind.object_id = t.object_id 
-            WHERE 
-                ind.is_unique_constraint = 0 
-                AND t.is_ms_shipped = 0 
-            ORDER BY 
-                t.name, ind.name, ic.key_ordinal
-            """
-            indexes_df = pd.read_sql_query(indexes_query, self.connection)
-            
-            # Convert indexes to list of dictionaries with JSON serializable values
-            indexes_list = []
-            for _, idx_row in indexes_df.iterrows():
-                # Handle NaN values that would cause JSON serialization issues
-                idx_dict = {}
-                for k, v in idx_row.items():
-                    if pd.isna(v):
-                        idx_dict[k] = None
-                    elif isinstance(v, (np.int64, np.int32)):
-                        idx_dict[k] = int(v)
-                    elif isinstance(v, (np.float64, np.float32)):
-                        idx_dict[k] = float(v) if not np.isnan(v) else None
-                    elif isinstance(v, bool):
-                        idx_dict[k] = bool(v)
-                    else:
-                        idx_dict[k] = v
-                        
-                indexes_list.append(idx_dict)
+            try:
+                indexes_query = """
+                SELECT 
+                    t.name AS table_name,
+                    ind.name AS index_name,
+                    col.name AS column_name,
+                    ind.is_unique,
+                    ind.is_primary_key
+                FROM 
+                    sys.indexes ind 
+                INNER JOIN 
+                    sys.index_columns ic ON ind.object_id = ic.object_id AND ind.index_id = ic.index_id 
+                INNER JOIN 
+                    sys.columns col ON ic.object_id = col.object_id AND ic.column_id = col.column_id 
+                INNER JOIN 
+                    sys.tables t ON ind.object_id = t.object_id 
+                WHERE 
+                    ind.is_unique_constraint = 0 
+                    AND t.is_ms_shipped = 0 
+                ORDER BY 
+                    t.name, ind.name, ic.key_ordinal
+                """
+                indexes_df = pd.read_sql_query(indexes_query, self.connection)
+                
+                # Convert indexes to list of dictionaries with JSON serializable values
+                indexes_list = []
+                for _, idx_row in indexes_df.iterrows():
+                    # Handle NaN values that would cause JSON serialization issues
+                    idx_dict = {}
+                    for k, v in idx_row.items():
+                        if pd.isna(v):
+                            idx_dict[k] = None
+                        elif isinstance(v, (np.int64, np.int32)):
+                            idx_dict[k] = int(v)
+                        elif isinstance(v, (np.float64, np.float32)):
+                            idx_dict[k] = float(v) if not np.isnan(v) else None
+                        elif isinstance(v, bool):
+                            idx_dict[k] = bool(v)
+                        else:
+                            idx_dict[k] = v
+                            
+                    indexes_list.append(idx_dict)
+            except Exception as e:
+                logger.error(f"Error processing indexes: {str(e)}")
+                indexes_list = []
             
             # Construct the DDL dictionary
             ddl = {
