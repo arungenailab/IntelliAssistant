@@ -967,35 +967,41 @@ def natural_language_to_sql():
         else:
             logger.warning("No database context provided for schema info")
             
-        # Import SQL generation utility
-        from utils.sql_generation import generate_sql_from_natural_language
+        # Import the Agent Orchestrator
+        from utils.agents.orchestrator import AgentOrchestrator
         
-        # Convert natural language to SQL
-        sql_result = generate_sql_from_natural_language(
+        # Initialize the orchestrator with default config
+        orchestrator = AgentOrchestrator()
+        
+        # Process the query through the agentic system
+        agent_result = orchestrator.process_query(
             user_query=user_query,
-            schema_info=schema_info,
+            connection_params=connection_params,
+            database_context=schema_info,
             conversation_history=conversation_history
         )
         
         # Log the generated SQL for debugging
-        logger.info(f"Generated SQL: {sql_result.get('sql', 'No SQL generated')}")
-        logger.info(f"Confidence: {sql_result.get('confidence', 0)}")
+        logger.info(f"Generated SQL: {agent_result.get('sql', 'No SQL generated')}")
+        logger.info(f"Success: {agent_result.get('success', False)}")
+        if agent_result.get('error'):
+            logger.warning(f"Error in SQL generation: {agent_result.get('error')}")
         
         # Execute the generated SQL if requested
         results = None
         visualization = None
-        if data.get('execute', True) and sql_result.get('sql'):
+        if data.get('execute', True) and agent_result.get('sql'):
             # Import SQL data fetcher
             from utils.sql_connector import fetch_sql_data
             
             # Fetch the data
             try:
                 # Log the query before execution
-                logger.info(f"Executing SQL query: {sql_result.get('sql')}")
+                logger.info(f"Executing SQL query: {agent_result.get('sql')}")
                 
                 results_df = fetch_sql_data(
                     connection_params=connection_params,
-                    query=sql_result.get('sql'),
+                    query=agent_result.get('sql'),
                     limit=data.get('limit', 1000)
                 )
                 
@@ -1018,7 +1024,7 @@ def natural_language_to_sql():
                     invalid_table = table_match.group(1) if table_match else "unknown"
                     
                     # Try to suggest correct table names
-                    available_tables = list(schema_info.keys()) if isinstance(schema_info, dict) else []
+                    available_tables = []
                     if isinstance(schema_info, dict) and 'tables' in schema_info:
                         available_tables = list(schema_info['tables'].keys())
                     
@@ -1026,19 +1032,22 @@ def natural_language_to_sql():
                 
                 return jsonify({
                     'success': True,
-                    'sql': sql_result.get('sql'),
-                    'explanation': sql_result.get('explanation'),
+                    'sql': agent_result.get('sql'),
+                    'explanation': agent_result.get('explanation'),
                     'error': error_message,
                     'available_tables': available_tables if 'available_tables' in locals() else []
                 }), 200
         
+        # Map agent result to API response format
         return jsonify({
-            'success': True,
-            'sql': sql_result.get('sql'),
-            'explanation': sql_result.get('explanation'),
-            'confidence': sql_result.get('confidence', 0.0),
+            'success': agent_result.get('success', False),
+            'sql': agent_result.get('sql', ''),
+            'explanation': agent_result.get('explanation', ''),
+            'error': agent_result.get('error'),
+            'confidence': 1.0 if agent_result.get('success', False) else 0.0,
             'results': results,
-            'visualization': visualization
+            'visualization': visualization,
+            'metadata': agent_result.get('metadata', {})
         })
         
     except Exception as e:
