@@ -1,85 +1,84 @@
 # IntelliAssistant
 
-An intelligent data analysis assistant powered by Google's Gemini AI. This application provides an interactive interface for data analysis, visualization, and insights generation.
+An intelligent assistant application that helps users query and analyze data from various sources, including SQL databases. The application uses natural language processing to convert user questions into SQL queries.
 
 ## Features
 
-- Interactive chat interface for data analysis
-- Support for uploading and analyzing various data formats (CSV, Excel)
-- Real-time data visualization
-- Dataset management and preview
-- Modern, responsive UI built with React and Material UI
-- Powered by Google's Gemini AI for intelligent analysis
+- Natural language to SQL conversion
+- Database schema analysis
+- Financial data analysis
+- Data visualization
+- Integration with multiple data sources
 
-## Tech Stack
+## Architecture
 
-### Frontend
-- React.js
-- Material UI
-- Axios for API communication
-- Chart.js for visualizations
+The application consists of:
 
-### Backend
-- Python
-- Flask
-- Pandas for data processing
-- Google Gemini AI for analysis
-- SQLite for data storage
+- Backend API built with Flask
+- Frontend UI built with React
+- SQL Server connectivity for database access
+- Integration with Gemini for AI capabilities
 
-## Setup
+## Getting Started
 
 ### Prerequisites
-- Python 3.8+
-- Node.js 14+
-- Google Gemini API key
 
-### Backend Setup
+- Python 3.8+
+- Node.js and npm
+- SQL Server instance (for database features)
+- Gemini API key
+
+### Installation
+
 1. Clone the repository
-2. Create a virtual environment:
-   ```bash
+   ```
+   git clone https://github.com/yourusername/IntelliAssistant.git
+   cd IntelliAssistant
+   ```
+
+2. Set up the Python environment
+   ```
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-3. Install dependencies:
-   ```bash
    pip install -r requirements.txt
    ```
-4. Set up environment variables:
-   ```bash
-   export GEMINI_API_KEY="your_api_key"  # On Windows: set GEMINI_API_KEY=your_api_key
-   ```
 
-### Frontend Setup
-1. Navigate to the frontend directory:
-   ```bash
-   cd frontend
+3. Configure the application
    ```
-2. Install dependencies:
-   ```bash
+   cp config.py.example config.py
+   ```
+   Edit `config.py` to add your API keys and configuration settings.
+
+4. Install frontend dependencies
+   ```
+   cd frontend
    npm install
+   npm run build
+   cd ..
    ```
 
-## Running the Application
-
-1. Start the backend server:
-   ```bash
-   python run.py
+5. Run the application
    ```
-2. In a separate terminal, start the frontend development server:
-   ```bash
-   cd frontend
-   npm start
+   python api.py
    ```
-3. Access the application at `http://localhost:3000`
 
-## Contributing
+The application should now be running at `http://localhost:5000`.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+## Environment Variables
+
+Set the following environment variables:
+
+- `GEMINI_API_KEY`: Your Gemini API key
+- `OPENAI_API_KEY`: Your OpenAI API key (if using OpenAI features)
+
+## Planned Enhancements
+
+- Implementation of an agentic approach for more robust SQL generation
+- Support for more database types
+- Enhanced visualizations
+- Local LLM integration
 
 ## License
 
+This project is licensed under the MIT License - see the LICENSE file for details. 
 This project is licensed under the MIT License - see the LICENSE file for details. 

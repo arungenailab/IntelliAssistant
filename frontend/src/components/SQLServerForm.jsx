@@ -143,10 +143,10 @@ const SQLServerForm = ({
         setError(`Database connection saved, but schema fetch failed: ${ddlError.message}`);
       }
       
-      console.log('SQL Server connection saved successfully');
+        console.log('SQL Server connection saved successfully');
       
       // Show success message before closing
-      setSaveSuccess(true);
+        setSaveSuccess(true);
       
       // Save connection details for easy reconnection
       localStorage.setItem('sqlServer', credentials.server);

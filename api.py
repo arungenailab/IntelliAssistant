@@ -1141,8 +1141,6 @@ def get_configured_sources():
             from utils.sql_connector import SQLServerConnector
             
             # Fetch all saved SQL server configurations
-            # For now, we'll look for recent successful connections
-            # In a production app, this would come from a proper database of saved connections
             sql_configs = SQLServerConnector.get_saved_configurations()
             
             # Add each SQL configuration as a configured source
@@ -1157,38 +1155,21 @@ def get_configured_sources():
                     'description': f"SQL Server connection to {config.get('server')}/{config.get('database')}",
                     'status': 'Active',
                     'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'auth_required': True
+                    'auth_required': True,
+                    'config': {
+                        'server': config.get('server'),
+                        'database': config.get('database'),
+                        'trusted_connection': config.get('trusted_connection', True)
+                    }
                 })
         except Exception as e:
             logger.warning(f"Error fetching SQL configurations: {str(e)}")
         
-        # If no configured sources were found, include sample data for demonstration
-        if not configured_sources:
-            logger.info("No configured sources found, returning sample data")
-            configured_sources = [
-                {
-                    'id': 'financial_1',
-                    'name': 'Alpha Vantage API (Sample)',
-                    'type': 'financial',
-                    'description': 'Financial market data (Sample)',
-                    'status': 'Active',
-                    'last_updated': '2023-07-15',
-                    'auth_required': True
-                },
-                {
-                    'id': 'sql_1',
-                    'name': 'Customer Database (Sample)',
-                    'type': 'sql_server',
-                    'description': 'SQL Server with customer data (Sample)',
-                    'status': 'Active',
-                    'last_updated': '2023-07-10',
-                    'auth_required': True
-                }
-            ]
-        
+        # Return only the actual configured sources
         return jsonify({
             'success': True,
-            'sources': configured_sources
+            'sources': configured_sources,
+            'total_count': len(configured_sources)
         })
     except Exception as e:
         logger.error(f"Error retrieving configured sources: {str(e)}")

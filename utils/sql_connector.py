@@ -858,64 +858,57 @@ class SQLServerConnector:
             ORDER BY 
                 TABLE_SCHEMA, TABLE_NAME
             """
-            try:
-                tables_df = pd.read_sql_query(tables_query, self.connection)
-                logger.info(f"Found {len(tables_df)} tables")
-            except Exception as e:
-                logger.error(f"Error fetching tables: {str(e)}")
-                return {"error": f"Error fetching tables: {str(e)}"}
+            
+            tables_df = pd.read_sql_query(tables_query, self.connection)
+            logger.info(f"Found {len(tables_df)} tables")
             
             # Get columns for each table
             tables_dict = {}
-            try:
-                for _, table_row in tables_df.iterrows():
-                    table_name = table_row['TABLE_NAME']
-                    
-                    # Get columns for this table
-                    columns_query = """
+            for _, table_row in tables_df.iterrows():
+                table_name = table_row['TABLE_NAME']
+                
+                # Get columns for this table
+                columns_query = """
+                SELECT 
+                    c.COLUMN_NAME,
+                    c.DATA_TYPE,
+                    c.CHARACTER_MAXIMUM_LENGTH,
+                    c.NUMERIC_PRECISION,
+                    c.NUMERIC_SCALE,
+                    c.IS_NULLABLE,
+                    CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 'YES' ELSE 'NO' END AS IS_PRIMARY_KEY
+                FROM 
+                    INFORMATION_SCHEMA.COLUMNS c
+                LEFT JOIN (
                     SELECT 
-                        c.COLUMN_NAME,
-                        c.DATA_TYPE,
-                        c.CHARACTER_MAXIMUM_LENGTH,
-                        c.NUMERIC_PRECISION,
-                        c.NUMERIC_SCALE,
-                        c.IS_NULLABLE,
-                        CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 'YES' ELSE 'NO' END AS IS_PRIMARY_KEY
+                        ku.TABLE_CATALOG,
+                        ku.TABLE_SCHEMA,
+                        ku.TABLE_NAME,
+                        ku.COLUMN_NAME
                     FROM 
-                        INFORMATION_SCHEMA.COLUMNS c
-                    LEFT JOIN (
-                        SELECT 
-                            ku.TABLE_CATALOG,
-                            ku.TABLE_SCHEMA,
-                            ku.TABLE_NAME,
-                            ku.COLUMN_NAME
-                        FROM 
-                            INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS tc
-                        JOIN 
-                            INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS ku
-                            ON tc.CONSTRAINT_TYPE = 'PRIMARY KEY' 
-                            AND tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
-                    ) pk
-                    ON 
-                        c.TABLE_CATALOG = pk.TABLE_CATALOG
-                        AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
-                        AND c.TABLE_NAME = pk.TABLE_NAME
-                        AND c.COLUMN_NAME = pk.COLUMN_NAME
-                    WHERE 
-                        c.TABLE_NAME = ?
-                    ORDER BY 
-                        c.ORDINAL_POSITION
-                    """
-                    try:
-                        columns_df = pd.read_sql_query(columns_query, self.connection, params=[table_name])
-                    except Exception as e:
-                        logger.error(f"Error fetching columns for table {table_name}: {str(e)}")
-                        continue
+                        INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS tc
+                    JOIN 
+                        INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS ku
+                        ON tc.CONSTRAINT_TYPE = 'PRIMARY KEY' 
+                        AND tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
+                ) pk
+                ON 
+                    c.TABLE_CATALOG = pk.TABLE_CATALOG
+                    AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
+                    AND c.TABLE_NAME = pk.TABLE_NAME
+                    AND c.COLUMN_NAME = pk.COLUMN_NAME
+                WHERE 
+                    c.TABLE_NAME = ?
+                ORDER BY 
+                    c.ORDINAL_POSITION
+                """
+                
+                try:
+                    columns_df = pd.read_sql_query(columns_query, self.connection, params=[table_name])
                     
                     # Convert columns to list of dictionaries with JSON serializable values
                     columns_list = []
                     for _, col_row in columns_df.iterrows():
-                        # Handle NaN values that would cause JSON serialization issues
                         col_dict = {}
                         for k, v in col_row.items():
                             if pd.isna(v):
@@ -923,41 +916,37 @@ class SQLServerConnector:
                             elif isinstance(v, (np.int64, np.int32)):
                                 col_dict[k] = int(v)
                             elif isinstance(v, (np.float64, np.float32)):
-                                # Convert numpy float to Python float
                                 col_dict[k] = float(v) if not np.isnan(v) else None
                             else:
                                 col_dict[k] = v
-                        
                         columns_list.append(col_dict)
                     
                     tables_dict[table_name] = columns_list
-            except Exception as e:
-                logger.error(f"Error processing tables and columns: {str(e)}")
-                return {"error": f"Error processing tables and columns: {str(e)}"}
+                except Exception as e:
+                    logger.error(f"Error fetching columns for table {table_name}: {str(e)}")
+                    continue
             
             # Get foreign key relationships
+            relationships_query = """
+            SELECT 
+                fk.name AS constraint_name,
+                OBJECT_NAME(fk.parent_object_id) AS parent_table,
+                COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS parent_column,
+                OBJECT_NAME(fk.referenced_object_id) AS referenced_table,
+                COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS referenced_column
+            FROM 
+                sys.foreign_keys AS fk
+            INNER JOIN 
+                sys.foreign_key_columns AS fkc 
+                ON fk.OBJECT_ID = fkc.constraint_object_id
+            ORDER BY 
+                parent_table, referenced_table
+            """
+            
             try:
-                relationships_query = """
-                SELECT 
-                    fk.name AS constraint_name,
-                    OBJECT_NAME(fk.parent_object_id) AS parent_table,
-                    COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS parent_column,
-                    OBJECT_NAME(fk.referenced_object_id) AS referenced_table,
-                    COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS referenced_column
-                FROM 
-                    sys.foreign_keys AS fk
-                INNER JOIN 
-                    sys.foreign_key_columns AS fkc 
-                    ON fk.OBJECT_ID = fkc.constraint_object_id
-                ORDER BY 
-                    parent_table, referenced_table
-                """
                 relationships_df = pd.read_sql_query(relationships_query, self.connection)
-                
-                # Convert relationships to list of dictionaries with JSON serializable values
                 relationships_list = []
                 for _, rel_row in relationships_df.iterrows():
-                    # Handle NaN values that would cause JSON serialization issues
                     rel_dict = {}
                     for k, v in rel_row.items():
                         if pd.isna(v):
@@ -968,41 +957,38 @@ class SQLServerConnector:
                             rel_dict[k] = float(v) if not np.isnan(v) else None
                         else:
                             rel_dict[k] = v
-                            
                     relationships_list.append(rel_dict)
             except Exception as e:
                 logger.error(f"Error processing relationships: {str(e)}")
                 relationships_list = []
             
             # Get indexes
+            indexes_query = """
+            SELECT 
+                t.name AS table_name,
+                ind.name AS index_name,
+                col.name AS column_name,
+                ind.is_unique,
+                ind.is_primary_key
+            FROM 
+                sys.indexes ind 
+            INNER JOIN 
+                sys.index_columns ic ON ind.object_id = ic.object_id AND ind.index_id = ic.index_id 
+            INNER JOIN 
+                sys.columns col ON ic.object_id = col.object_id AND ic.column_id = col.column_id 
+            INNER JOIN 
+                sys.tables t ON ind.object_id = t.object_id 
+            WHERE 
+                ind.is_unique_constraint = 0 
+                AND t.is_ms_shipped = 0 
+            ORDER BY 
+                t.name, ind.name, ic.key_ordinal
+            """
+            
             try:
-                indexes_query = """
-                SELECT 
-                    t.name AS table_name,
-                    ind.name AS index_name,
-                    col.name AS column_name,
-                    ind.is_unique,
-                    ind.is_primary_key
-                FROM 
-                    sys.indexes ind 
-                INNER JOIN 
-                    sys.index_columns ic ON ind.object_id = ic.object_id AND ind.index_id = ic.index_id 
-                INNER JOIN 
-                    sys.columns col ON ic.object_id = col.object_id AND ic.column_id = col.column_id 
-                INNER JOIN 
-                    sys.tables t ON ind.object_id = t.object_id 
-                WHERE 
-                    ind.is_unique_constraint = 0 
-                    AND t.is_ms_shipped = 0 
-                ORDER BY 
-                    t.name, ind.name, ic.key_ordinal
-                """
                 indexes_df = pd.read_sql_query(indexes_query, self.connection)
-                
-                # Convert indexes to list of dictionaries with JSON serializable values
                 indexes_list = []
                 for _, idx_row in indexes_df.iterrows():
-                    # Handle NaN values that would cause JSON serialization issues
                     idx_dict = {}
                     for k, v in idx_row.items():
                         if pd.isna(v):
@@ -1015,26 +1001,23 @@ class SQLServerConnector:
                             idx_dict[k] = bool(v)
                         else:
                             idx_dict[k] = v
-                            
                     indexes_list.append(idx_dict)
             except Exception as e:
                 logger.error(f"Error processing indexes: {str(e)}")
                 indexes_list = []
             
-            # Construct the DDL dictionary
-            ddl = {
+            # Return the complete DDL dictionary
+            return {
                 "tables": tables_dict,
                 "relationships": relationships_list,
                 "indexes": indexes_list
             }
             
-            return ddl
         except Exception as e:
             logger.error(f"Error getting database DDL: {str(e)}")
             logger.error(traceback.format_exc())
             return {"error": f"Error getting database DDL: {str(e)}"}
         finally:
-            # Close connection
             self.disconnect()
 
 def fetch_sql_data(connection_params: Dict[str, str], query: str = None, table_name: str = None, limit: int = 1000) -> pd.DataFrame:

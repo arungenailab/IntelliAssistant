@@ -137,35 +137,37 @@ AVAILABLE TABLES AND THEIR COLUMNS:
 {context_prompt}USER QUERY:
 "{user_query}"
 
-INSTRUCTIONS:
-1. ONLY use tables and columns that ACTUALLY EXIST in this database.
-2. Refer to the "EXACT COLUMN NAMES FOR EACH TABLE" section at the beginning of the schema above.
-3. Copy column names exactly as they appear in the schema, without any alteration.
-4. REQUIRED VERIFICATION PROCESS - For each table you plan to use:
-   a. Find the table in the "EXACT COLUMN NAMES" section
-   b. Copy the exact column names from that section
-   c. Verify each column name character-by-character
-   d. Do not assume standard column names - use ONLY what's in the schema
-5. If the user's query mentions a table or column that doesn't exist, use the closest matching alternative.
-6. If you cannot map the query to existing columns, explain why rather than generating invalid SQL.
-7. Provide a detailed explanation that explicitly lists all tables and columns you're using.
+CRITICAL INSTRUCTIONS (MUST FOLLOW EXACTLY):
+1. You MUST ONLY use tables and columns that EXACTLY match what is listed in the schema above.
+2. NEVER substitute column names with synonyms or similar terms - use the EXACT column names as shown.
+3. For the "Transactions" table, note that:
+   - It has "price_per_unit" (NOT "price")
+   - It has "total_amount" (NOT "amount" or "total")
+   - It does NOT have any column called "fees" or "fee"
+4. COLUMN NAME VERIFICATION PROCESS (MANDATORY):
+   a. For each column you plan to use, find it in the "EXACT COLUMN NAMES" section
+   b. Copy-paste the exact column name - CHARACTER BY CHARACTER - from the schema
+   c. Double-check spelling and casing of each column name against the schema
+   d. If the user mentions a column that doesn't exist, do NOT use a similar name - use the closest ACTUAL column name
+5. If you cannot find a real column that matches what the user is asking for, state this clearly in your explanation.
+6. Every column in your SQL query MUST appear verbatim in the schema - no exceptions.
 
-IMPORTANT NOTES ABOUT COLUMN NAMES:
-- The 'Clients' table DOES NOT have an 'address' column
-- The 'Clients' table has 'phone' (not 'phone_number')
-- Always double-check schema above for EXACT column names
+EXAMPLE (for Transactions table):
+✓ CORRECT: SELECT price_per_unit FROM Transactions
+✗ WRONG: SELECT price FROM Transactions (column doesn't exist)
+✓ CORRECT: SELECT transaction_type, quantity, total_amount FROM Transactions
+✗ WRONG: SELECT type, qty, amount FROM Transactions (columns don't exist)
 
-Column name verification example:
-User query: "Show me all clients with their contact info"
-Verification:
-1. Tables: Clients
-2. Available columns in Clients: client_id, last_name, first_name, email, created_date, phone
-3. Creating SQL using only these exact column names: SELECT client_id, last_name, first_name, email, phone FROM Clients
+VERIFICATION STEPS (REQUIRED):
+1. After drafting your SQL, compare EVERY column name against the schema list
+2. If any column is not an exact match to the schema, replace it with the correct name or remove it
+3. If you can't find a suitable column, explain this in your response
+4. Check one final time that each column name in your SQL exactly matches the schema
 
 Format your response as a JSON object with the following fields:
-- sql: The SQL query (using ONLY tables and columns that exist in the schema)
+- sql: The SQL query (using ONLY columns that EXACTLY match the schema)
 - explanation: A detailed explanation including your column verification steps
-- confidence: A confidence score from 0.0 to 1.0
+- confidence: A confidence score from 0.0 to 1.0 (use 0.0 if you're not confident the column names match)
 
 JSON RESPONSE:
 """
