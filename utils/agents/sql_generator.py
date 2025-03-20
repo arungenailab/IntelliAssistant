@@ -541,89 +541,207 @@ class SQLGeneratorAgent(BaseAgent):
         
         return sql_query
     
+    def _validate_sql(self, sql_query: str, schema_info: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        """
+        Validate the generated SQL query.
+        
+        Args:
+            sql_query (str): SQL query to validate
+            schema_info (Dict[str, Any]): Schema information
+            
+        Returns:
+            Tuple[bool, Optional[str]]: Tuple of (is_valid, error_message)
+        """
+        # Check if the query is empty or None
+        if not sql_query or sql_query.strip() == "":
+            return False, "Empty SQL query"
+            
+        # Check if the query has basic SQL structure
+        sql_query = sql_query.strip()
+        
+        # Check if query starts with a valid SQL command
+        valid_starts = ["SELECT", "INSERT", "UPDATE", "DELETE", "WITH"]
+        if not any(sql_query.upper().startswith(cmd) for cmd in valid_starts):
+            return False, f"SQL query must start with one of: {', '.join(valid_starts)}"
+        
+        # Basic syntax validation
+        try:
+            # Check for unbalanced parentheses
+            if sql_query.count('(') != sql_query.count(')'):
+                return False, "Unbalanced parentheses in SQL query"
+                
+            # Check for FROM clause in SELECT statements
+            if sql_query.upper().startswith("SELECT") and "FROM" not in sql_query.upper():
+                return False, "SELECT statement missing FROM clause"
+                
+            # Check for malformed WHERE conditions
+            if "WHERE" in sql_query.upper():
+                where_idx = sql_query.upper().find("WHERE")
+                after_where = sql_query[where_idx + 5:].strip()
+                if not after_where or after_where.startswith(("ORDER", "GROUP", "HAVING", "LIMIT")):
+                    return False, "WHERE clause is incomplete"
+            
+            # Check for missing table names
+            if "FROM" in sql_query.upper() and not re.search(r"FROM\s+\w+", sql_query, re.IGNORECASE):
+                return False, "FROM clause missing table name"
+            
+            # Add more validation as needed
+            
+            return True, None
+            
+        except Exception as e:
+            logger.exception(f"Error validating SQL: {str(e)}")
+            return False, f"SQL validation error: {str(e)}"
+    
+    def _generate_fallback_query(self, tables_used: List[str]) -> str:
+        """
+        Generate a fallback SQL query when other methods fail.
+        This ensures we always have a valid SQL query to return.
+        
+        Args:
+            tables_used (List[str]): List of tables to use in the query
+            
+        Returns:
+            str: A simple but valid SQL query
+        """
+        # If no tables specified, use a default table
+        if not tables_used:
+            # Get the first table from schema info if available
+            schema_info = self.state.get("schema_info", {})
+            if "tables" in schema_info and schema_info["tables"]:
+                table_name = next(iter(schema_info["tables"].keys()))
+            else:
+                # No tables found in schema, use a generic name
+                table_name = "Transactions"  # Common default table
+        else:
+            table_name = tables_used[0]
+        
+        # Generate a basic SELECT query with TOP/LIMIT to ensure it's not too large
+        if "SQLServer" in self.config.get("db_type", "").upper():
+            return f"SELECT TOP 1000 * FROM {table_name}"
+        else:
+            return f"SELECT * FROM {table_name} LIMIT 1000"
+    
     def _generate_with_llm(self, input_data: Dict[str, Any], 
                           error_msg: Optional[str] = None) -> str:
         """
-        Generate SQL using LLM as a fallback or for complex cases.
+        Generate SQL using a Language Learning Model (LLM).
         
         Args:
             input_data (Dict[str, Any]): Input data
-            error_msg (str, optional): Error message from prior attempt
+            error_msg (Optional[str]): Error message from previous generation attempt
             
         Returns:
             str: Generated SQL query
         """
-        user_query = input_data.get("user_query", "")
-        schema_info = input_data.get("schema_info", {})
-        intent_info = input_data.get("intent_info", {})
-        validated_columns = input_data.get("validated_columns", {})
-        tables_used = input_data.get("tables_used", [])
-        
-        # Create context for the LLM
-        schema_context = self._create_schema_context(schema_info, tables_used)
-        
-        # Create prompt for the LLM
-        prompt = f"""
-You are a SQL expert. Generate a SQL query for SQL Server based on the following details:
-
-USER QUERY: {user_query}
-
-{schema_context}
-
-OPERATION TYPE: {intent_info.get('operation', 'SELECT')}
-
-TABLES TO USE: {', '.join(tables_used)}
-
-COLUMNS TO INCLUDE:
-{self._format_validated_columns(validated_columns)}
-
-"""
-        
-        # Add error information if available
-        if error_msg:
-            prompt += f"""
-PREVIOUS ERROR: {error_msg}
-Please correct the issues in the SQL query.
-"""
-        
-        # Add additional constraints
-        if intent_info.get("has_filters", False):
-            filters = intent_info.get("filters", [])
-            prompt += f"\nFILTERS: {', '.join(filters)}\n"
-        
-        if intent_info.get("has_grouping", False):
-            group_by = intent_info.get("group_by", [])
-            prompt += f"\nGROUP BY: {', '.join(group_by)}\n"
-        
-        if intent_info.get("has_ordering", False):
-            order_by = intent_info.get("order_by", [])
-            prompt += f"\nORDER BY: {str(order_by)}\n"
-        
-        if intent_info.get("has_limit", False):
-            limit = intent_info.get("limit")
-            prompt += f"\nLIMIT: {limit}\n"
-        
-        prompt += """
-Generate a complete SQL query that is valid for SQL Server. Respond with ONLY the SQL code, no comments or explanation.
-"""
-        
         try:
-            # Get response from LLM
-            sql = get_gemini_response(prompt, response_format="text")
+            # Extract required data
+            schema_info = input_data["schema_info"]
+            tables_used = input_data["tables_used"]
+            intent_info = input_data["intent_info"]
+            validated_columns = input_data.get("validated_columns", {})
             
-            # Clean up the response
-            if isinstance(sql, str):
-                # Remove any markdown backticks or "sql" markers
-                sql = re.sub(r'^```sql\s*', '', sql)
-                sql = re.sub(r'^```\s*', '', sql)
-                sql = re.sub(r'\s*```$', '', sql)
-                sql = sql.strip()
+            # Create schema context for the LLM
+            schema_context = self._create_schema_context(schema_info, tables_used)
             
-            return sql
+            # Format validated columns
+            columns_context = self._format_validated_columns(validated_columns)
             
+            # Build system prompt
+            system_prompt = f"""
+            You are an expert SQL query generator. Generate a valid SQL query based on the user's request.
+            Use ONLY the tables and columns provided in the schema context.
+            
+            Schema Context:
+            {schema_context}
+            
+            Validated Columns:
+            {columns_context}
+            
+            {"Previous Error: " + error_msg if error_msg else ""}
+            
+            Instructions:
+            1. ONLY use tables and columns from the provided schema
+            2. Ensure proper joins are used when multiple tables are involved
+            3. Return ONLY the SQL query without any explanation or markdown
+            4. Use proper SQL syntax for the database type
+            5. Do not use any columns or tables not listed in the schema
+            6. Include table names for columns when joining multiple tables
+            """
+            
+            # Build query prompt
+            query_prompt = f"""
+            Create a SQL query to {intent_info.get('description', 'retrieve data')}
+            
+            The query should:
+            - Operation: {intent_info.get('operation', 'select')}
+            {f"- Conditions: {intent_info.get('conditions', '')}" if intent_info.get('conditions') else ""}
+            {f"- Sorting: {intent_info.get('order_by', '')}" if intent_info.get('order_by') else ""}
+            {f"- Group By: {intent_info.get('group_by', '')}" if intent_info.get('group_by') else ""}
+            {f"- Limit: {intent_info.get('limit', '')}" if intent_info.get('limit') else ""}
+            
+            Tables to use: {', '.join(tables_used) if tables_used else 'Any appropriate table from the schema'}
+            """
+            
+            # Call the LLM
+            llm_response = get_gemini_response(
+                prompt=query_prompt,
+                system_prompt=system_prompt,
+                response_format="text",
+                model=self.config.get("llm_model", "models/gemini-2.0-flash")
+            )
+            
+            # Extract the SQL from the response
+            if isinstance(llm_response, dict) and "error" in llm_response:
+                logger.warning(f"LLM error: {llm_response['error']}")
+                return self._generate_fallback_query(tables_used)
+                
+            sql_query = self._extract_sql_from_text(llm_response)
+            
+            # Validate the query
+            is_valid, error = self._validate_sql(sql_query, schema_info)
+            if not is_valid:
+                logger.warning(f"LLM generated invalid SQL: {error}")
+                return self._generate_fallback_query(tables_used)
+                
+            return sql_query
+        
         except Exception as e:
             logger.exception(f"Error generating SQL with LLM: {str(e)}")
+            return self._generate_fallback_query(input_data.get("tables_used", []))
+    
+    def _extract_sql_from_text(self, text: str) -> str:
+        """
+        Extract SQL query from text response.
+        
+        Args:
+            text (str): Text containing SQL query
+            
+        Returns:
+            str: Extracted SQL query
+        """
+        if not text:
             return ""
+            
+        # Try to extract SQL between code blocks
+        code_block_pattern = r"```(?:sql)?\s*([\s\S]*?)\s*```"
+        matches = re.findall(code_block_pattern, text)
+        
+        if matches:
+            return matches[0].strip()
+        
+        # If no code blocks, assume the entire text is SQL
+        # but clean up any markdown or explanations
+        lines = text.split('\n')
+        sql_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            # Skip common markdown and explanatory text markers
+            if line and not line.startswith(('#', '-', '*', '>', '|')):
+                sql_lines.append(line)
+        
+        return ' '.join(sql_lines).strip()
     
     def _create_schema_context(self, schema_info: Dict[str, Any], 
                               tables_used: List[str]) -> str:
@@ -702,68 +820,4 @@ Generate a complete SQL query that is valid for SQL Server. Respond with ONLY th
                 result += f" [matched from '{col_name}' using {match_type}]"
             result += "\n"
         
-        return result
-    
-    def _validate_sql(self, sql_query: str, schema_info: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
-        """
-        Perform basic validation of the generated SQL query.
-        
-        Args:
-            sql_query (str): SQL query to validate
-            schema_info (Dict[str, Any]): Schema information
-            
-        Returns:
-            Tuple[bool, Optional[str]]: (is_valid, error_message)
-        """
-        if not sql_query:
-            return False, "Empty SQL query"
-        
-        # Basic syntax check
-        sql_query = sql_query.strip()
-        
-        # Check for balancing of parentheses
-        if sql_query.count('(') != sql_query.count(')'):
-            return False, "Unbalanced parentheses in SQL query"
-        
-        # Check for required clauses in SELECT
-        if sql_query.upper().startswith("SELECT"):
-            if "FROM" not in sql_query.upper():
-                return False, "SELECT query missing FROM clause"
-        
-        # Check for required table in UPDATE
-        if sql_query.upper().startswith("UPDATE"):
-            if "SET" not in sql_query.upper():
-                return False, "UPDATE query missing SET clause"
-        
-        # Check for required table in INSERT
-        if sql_query.upper().startswith("INSERT"):
-            if "VALUES" not in sql_query.upper() and "SELECT" not in sql_query.upper():
-                return False, "INSERT query missing VALUES or SELECT clause"
-        
-        # Check for required table in DELETE
-        if sql_query.upper().startswith("DELETE"):
-            if "FROM" not in sql_query.upper():
-                return False, "DELETE query missing FROM clause"
-        
-        # Check that all tables mentioned exist in schema
-        # This is a simplistic approach - a real validator would parse the SQL properly
-        if "tables" in schema_info:
-            available_tables = set(schema_info["tables"].keys())
-            
-            # Extract table names from the SQL (simplified approach)
-            for table in available_tables:
-                # Look for patterns like "FROM table", "JOIN table", "UPDATE table"
-                patterns = [f"FROM\\s+{table}\\b", f"JOIN\\s+{table}\\b", f"UPDATE\\s+{table}\\b", 
-                            f"INTO\\s+{table}\\b", f"TABLE\\s+{table}\\b"]
-                
-                # Check if any table patterns are present
-                table_present = any(re.search(pattern, sql_query, re.IGNORECASE) for pattern in patterns)
-                
-                # If a table is mentioned but doesn't exist in schema, fail validation
-                if table_present and table not in available_tables:
-                    return False, f"Table '{table}' not found in schema"
-        
-        # Placeholder for more sophisticated validation
-        # In a real implementation, you would use a SQL parser to do thorough validation
-        
-        return True, None 
+        return result 

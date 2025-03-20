@@ -185,7 +185,9 @@ class SchemaAgent(BaseAgent):
             logger.exception(f"Error fetching schema: {str(e)}")
             raise
         finally:
-            connector.close()
+            # Use disconnect method instead of close
+            if hasattr(connector, 'disconnect'):
+                connector.disconnect()
     
     def _enhance_schema(self, schema_info: Dict[str, Any]) -> None:
         """
@@ -197,6 +199,13 @@ class SchemaAgent(BaseAgent):
         # Add common aliases for tables
         if "tables" in schema_info:
             for table_name, table_info in schema_info["tables"].items():
+                # Make sure table_info is a dictionary
+                if not isinstance(table_info, dict):
+                    logger.warning(f"Table info for {table_name} is not a dictionary: {table_info}")
+                    # Initialize as dictionary if it's not one
+                    schema_info["tables"][table_name] = {"name": table_name}
+                    table_info = schema_info["tables"][table_name]
+                
                 # Simple pluralization/singularization
                 if table_name.endswith('s'):
                     table_info["aliases"] = [table_name, table_name[:-1]]
@@ -206,6 +215,9 @@ class SchemaAgent(BaseAgent):
         # Add common aliases for columns
         if "tables" in schema_info:
             for table_name, table_info in schema_info["tables"].items():
+                if not isinstance(table_info, dict):
+                    continue
+                    
                 if "columns" in table_info:
                     for col_name, col_info in table_info["columns"].items():
                         # Add aliases for common patterns
