@@ -413,87 +413,66 @@ def ensure_proper_formatting(text: str) -> str:
 
 def query_gemini(user_query: str, system_prompt: Optional[str] = None, model: str = DEFAULT_MODEL) -> str:
     """
-    Query Gemini with user input and an optional system prompt.
+    Query Gemini API with user query and optional system prompt.
     
     Args:
-        user_query (str): The user's query
-        system_prompt (str, optional): System instructions for the model
-        model (str, optional): The Gemini model to use
+        user_query: The user's query
+        system_prompt: Optional system prompt for context
+        model: Model ID to use
         
     Returns:
-        str: The model's response
+        The response text from Gemini
     """
-    # Maximum number of retries
-    max_retries = 5
-    retry_count = 0
-    
-    while retry_count < max_retries:
-        try:
-            # Create model instance using the specified model or default
-            model_to_use = model if model else "models/gemini-2.0-flash"
-            print(f"Using Gemini model: {model_to_use}")
-            model_instance = genai.GenerativeModel(model_to_use)
-            
-            # Set generation config with reduced tokens for quota efficiency
-            generation_config = {
-                "temperature": 0.2,
-                "top_p": 0.95,
-                "top_k": 40,
-                "max_output_tokens": 4096,  # Reduced from 8192 for quota efficiency
-                "candidate_count": 1
-            }
-            
-            # Prepare the prompt
-            if system_prompt:
-                # Add specific instruction to provide complete answers
-                enhanced_system_prompt = system_prompt.strip() + """
-                
-                IMPORTANT: Provide complete, comprehensive answers that anticipate the user's needs.
-                DO NOT ask follow-up questions in your response. Instead, provide all relevant information
-                in a single, thorough answer.
-                """
-                
-                # Combine prompts
-                combined_prompt = f"{enhanced_system_prompt}\n\nUser query: {user_query}"
-                response = model_instance.generate_content(
-                    combined_prompt,
-                    generation_config=generation_config
-                )
-            else:
-                # Add instruction to the raw query
-                enhanced_query = f"""
-                Please provide a complete answer to the following query without asking follow-up questions.
-                Format your response with proper line breaks and spacing:
-                
-                {user_query}
-                """
-                response = model_instance.generate_content(
-                    enhanced_query,
-                    generation_config=generation_config
-                )
-            
-            # Apply proper formatting to the response text
-            formatted_response = ensure_proper_formatting(response.text.strip())
-            
-            # Return the formatted text response
-            return formatted_response
+    try:
+        # Fallback for testing when API is not available
+        if genai is None or DEFAULT_MODEL is None:
+            return f"[FALLBACK RESPONSE] I can't process this query because the Gemini API is not configured properly: {user_query}"
         
-        except Exception as e:
-            retry_count += 1
-            if retry_count >= max_retries:
-                if "429" in str(e) or "quota" in str(e).lower():
-                    return "I apologize, but we've temporarily exceeded our quota limits. Please try again in a few minutes."
-                else:
-                    return f"I encountered an error analyzing the data: {str(e)}"
-            
-            # Exponential backoff with longer initial wait
-            wait_time = 5 * (2 ** retry_count)  # Starts at 10 seconds, then 20, 40, etc.
-            print(f"Error querying Gemini: {str(e)}. Retrying in {wait_time} seconds...")
-            time.sleep(wait_time)
+        # Set the model to use
+        model_to_use = model or DEFAULT_MODEL
+        gemini_model = genai.GenerativeModel(model_to_use)
+        
+        # Build the prompt
+        prompt = ""
+        if system_prompt:
+            prompt += f"{system_prompt}\n\n"
+        prompt += user_query
+        
+        # Generate the response
+        response = gemini_model.generate_content(prompt)
+        
+        # Extract the response text
+        if hasattr(response, 'text'):
+            result = response.text
+        elif hasattr(response, 'parts'):
+            result = response.parts[0].text
+        else:
+            result = str(response)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error querying Gemini: {e}")
+        return f"Error querying Gemini: {str(e)}"
+
+def get_gemini_response(prompt: str, system_prompt: Optional[str] = None, model: str = DEFAULT_MODEL) -> str:
+    """
+    Wrapper function to get a response from Gemini.
+    This is a compatibility function that wraps query_gemini for other modules.
+    
+    Args:
+        prompt: The user prompt to send to Gemini
+        system_prompt: Optional system prompt for context
+        model: The model ID to use
+        
+    Returns:
+        The response text from Gemini
+    """
+    return query_gemini(prompt, system_prompt, model)
 
 def suggest_query_improvements(user_query: str, data_context: Dict) -> Dict[str, Any]:
     """
-    Suggest improvements to user's query based on available data.
+    Suggest improvements for a user query based on the data context.
     
     Args:
         user_query (str): The user's original query

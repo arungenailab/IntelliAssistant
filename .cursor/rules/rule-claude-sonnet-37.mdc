@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: Base Guidelines for Sonnet-3.7 + Cursor Agent
 globs: *,**/*
 ---
@@ -20,6 +25,7 @@ globs: *,**/*
 1. Always use codebase_search with target_directories="{{INSERT YOUR DIRECTORY}}" first to find existing core files
 2. Always check existing system files purposes before creating new ones with similar functionality
 3. Always list the cursor rules youre using
+4. Use sequential thinking tool extensively
 
 # Optional
 

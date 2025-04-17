@@ -1,0 +1,8 @@
+langchain>=0.1.0
+langgraph>=0.0.15
+langchain-core>=0.1.0
+langchain-community>=0.0.13
+langchain-google-genai>=0.0.5
+pydantic>=2.0.0
+nest-asyncio>=1.5.7
+SQLAlchemy>=2.0.0

@@ -1,3 +1,4 @@
+# Core dependencies
 flask==2.3.3
 flask-cors==3.0.10
 pandas==1.5.3
@@ -12,3 +13,21 @@ openai==0.27.8
 pymongo==4.3.3
 openpyxl==3.1.2
 xlrd==2.0.1
+
+# LangGraph SQL dependencies
+langchain>=0.1.0,<0.4.0
+langgraph>=0.0.15
+langchain-community>=0.0.13,<0.4.0
+langchain-core>=0.1.14,<0.3.0
+pydantic>=2.0.0
+langchain-openai>=0.0.5
+langchain-google-genai>=0.0.5
+sqlalchemy>=2.0.0
+pyodbc>=4.0.39
+
+# Utilities
+asyncio>=3.4.3
+sqlparse>=0.5.0
+
+# Existing project dependencies (add as needed)
+numpy>=1.26.0

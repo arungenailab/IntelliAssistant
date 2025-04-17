@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   Box, 
   Table, 
@@ -16,7 +16,8 @@ import {
   Tooltip,
   Collapse,
   Button,
-  ButtonGroup
+  ButtonGroup,
+  useTheme
 } from '@mui/material';
 import { 
   ExpandMore, 
@@ -24,14 +25,21 @@ import {
   Code, 
   BarChart, 
   CheckCircle, 
-  Error, 
+  Error as ErrorIcon, 
   Warning,
   Download,
   Article
 } from '@mui/icons-material';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import * as ExcelJS from 'exceljs';
+import { vscDarkPlus, prism } from 'react-syntax-highlighter/dist/esm/styles/prism';
+
+// Safe import of xlsx
+let XLSX;
+try {
+  XLSX = require('xlsx');
+} catch (e) {
+  console.warn('XLSX library not available:', e);
+}
 
 /**
  * Component to display SQL query results
@@ -39,27 +47,58 @@ import * as ExcelJS from 'exceljs';
 const SQLResultView = ({ 
   sql, 
   explanation, 
-  results, 
-  error, 
+  results = [], 
+  error = null,
   confidence = 0,
-  visualization = null 
+  visualization = null,
+  compact = false // Add compact mode for chat interface
 }) => {
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(5);
-  const [showSql, setShowSql] = useState(false);
-  const [showExplanation, setShowExplanation] = useState(true);
+  const theme = useTheme();
+  
+  // Determine which syntax highlighter theme to use based on the current theme mode
+  const syntaxTheme = theme.palette.mode === 'dark' ? vscDarkPlus : prism;
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(compact ? results.length : 10);
+  const [showSql, setShowSql] = useState(compact); // Change to show SQL by default in compact mode
+  const [showExplanation, setShowExplanation] = useState(!compact);
   
   // Get confidence level styling
   const getConfidenceLevel = () => {
-    if (confidence >= 0.8) return { color: 'success', icon: <CheckCircle fontSize="small" /> };
-    if (confidence >= 0.5) return { color: 'warning', icon: <Warning fontSize="small" /> };
-    return { color: 'error', icon: <Error fontSize="small" /> };
+    // Ensure confidence is a number and between 0 and 1
+    const confidenceValue = typeof confidence === 'number' ? Math.max(0, Math.min(1, confidence)) : 0;
+    
+    if (confidenceValue >= 0.75) return { color: 'success', icon: <CheckCircle fontSize="small" /> };
+    if (confidenceValue >= 0.5) return { color: 'warning', icon: <Warning fontSize="small" /> };
+    return { color: 'error', icon: <ErrorIcon fontSize="small" /> };
   };
   
   const confidenceInfo = getConfidenceLevel();
   
   // Extract column headers from results
   const columns = results && results.length > 0 ? Object.keys(results[0]) : [];
+  
+  // Format table for chat messages if compact
+  const formatTableForChat = () => {
+    if (!results || results.length === 0) return 'No results';
+    
+    // Create header row
+    const header = columns.join(' | ');
+    const separator = columns.map(() => '---').join(' | ');
+    
+    // Create data rows (limited to first 5 for chat display)
+    const dataRows = results.slice(0, 5).map(row => {
+      return columns.map(col => {
+        const value = row[col];
+        return value !== null && value !== undefined ? String(value) : '';
+      }).join(' | ');
+    });
+    
+    // Add a message if there are more rows
+    const moreRowsMessage = results.length > 5 ? 
+      `\n\n*Showing 5 of ${results.length} results. See full results in the data view.*` : '';
+    
+    return '```\n' + [header, separator, ...dataRows].join('\n') + '\n```' + moreRowsMessage;
+  };
   
   // Handle table pagination
   const handleChangePage = (event, newPage) => {
@@ -68,11 +107,14 @@ const SQLResultView = ({
   
   const handleChangeRowsPerPage = (event) => {
     setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
+    setPage(1);
   };
   
-  // Calculate empty rows for pagination
-  const emptyRows = rowsPerPage - Math.min(rowsPerPage, (results?.length || 0) - page * rowsPerPage);
+  // Calculate pagination indices
+  const startIndex = (page - 1) * rowsPerPage;
+  const endIndex = startIndex + rowsPerPage;
+  const displayedResults = results.slice(startIndex, endIndex);
+  const totalPages = Math.ceil(results.length / rowsPerPage);
   
   // Handle SQL display toggle
   const toggleSql = () => {
@@ -121,48 +163,20 @@ const SQLResultView = ({
   };
 
   // Download results as Excel
-  const downloadExcel = async () => {
+  const downloadExcel = () => {
     if (!results || results.length === 0) return;
     
+    if (!XLSX) {
+      console.warn('XLSX library not available, falling back to CSV');
+      downloadCsv();
+      return;
+    }
+    
     try {
-      // Create a new workbook and worksheet
-      const workbook = new ExcelJS.Workbook();
-      const worksheet = workbook.addWorksheet('SQL Results');
-      
-      // Add headers
-      worksheet.columns = columns.map(column => ({
-        header: column,
-        key: column,
-        width: 20
-      }));
-      
-      // Add data rows
-      results.forEach(row => {
-        const rowData = {};
-        columns.forEach(column => {
-          rowData[column] = row[column]?.toString() || '';
-        });
-        worksheet.addRow(rowData);
-      });
-      
-      // Style the header row
-      worksheet.getRow(1).font = { bold: true };
-      
-      // Generate Excel file
-      const buffer = await workbook.xlsx.writeBuffer();
-      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      const url = URL.createObjectURL(blob);
-      
-      // Create a temporary download link and trigger click
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `sql_results_${new Date().toISOString().split('T')[0]}.xlsx`);
-      document.body.appendChild(link);
-      link.click();
-      
-      // Clean up
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      const worksheet = XLSX.utils.json_to_sheet(results);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Results");
+      XLSX.writeFile(workbook, `sql_results_${new Date().toISOString().split('T')[0]}.xlsx`);
     } catch (error) {
       console.error("Error generating Excel file:", error);
       // Fallback to CSV if Excel generation fails
@@ -198,8 +212,188 @@ const SQLResultView = ({
   };
   
   return (
-    <Box sx={{ mt: 1, width: '100%' }}>
-      {/* SQL Query & Confidence Section */}
+    <Box sx={{ width: '100%' }}>
+      {/* If in compact mode for chat, render a simpler version */}
+      {compact ? (
+        <>
+          {/* Compact SQL Result View for Chat */}
+          <Box sx={{ mb: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <Chip 
+                size="small" 
+                label={`SQL Query (${confidence ? Math.round(confidence * 100) : 0}% confident)`} 
+                color={confidenceInfo.color} 
+                icon={confidenceInfo.icon} 
+                sx={{ mr: 1, textTransform: 'none' }}
+              />
+              <IconButton 
+                size="small" 
+                onClick={toggleSql}
+                sx={{ mr: 0.5 }}
+                aria-label={showSql ? "Hide SQL" : "Show SQL"}
+              >
+                {showSql ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
+              </IconButton>
+            </Box>
+            
+            {/* SQL Query Collapse for Compact View */}
+            <Collapse in={showSql}>
+              <Box sx={{ mb: 1 }}>
+                <SyntaxHighlighter 
+                  language="sql" 
+                  style={syntaxTheme}
+                  customStyle={{ 
+                    margin: 0, 
+                    borderRadius: '4px',
+                    maxHeight: '150px',
+                    fontSize: '0.75rem'
+                  }}
+                >
+                  {sql || '-- No SQL query available'}
+                </SyntaxHighlighter>
+              </Box>
+            </Collapse>
+            
+            {error ? (
+              <Box sx={{ p: 1, bgcolor: 'error.light', borderRadius: 1, mb: 1 }}>
+                <Typography variant="body2" color="error.dark">{error}</Typography>
+              </Box>
+            ) : (
+              <>
+                {/* Download Options for Compact View */}
+                {results && results.length > 0 && (
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+                    <ButtonGroup size="small" variant="outlined">
+                      <Tooltip title="Download as CSV">
+                        <Button
+                          size="small"
+                          startIcon={<Download fontSize="small" />}
+                          onClick={downloadCsv}
+                          sx={{ fontSize: '0.7rem', py: 0.5 }}
+                        >
+                          CSV
+                        </Button>
+                      </Tooltip>
+                      {XLSX && (
+                        <Tooltip title="Download as Excel">
+                          <Button
+                            size="small"
+                            startIcon={<Article fontSize="small" />}
+                            onClick={downloadExcel}
+                            sx={{ fontSize: '0.7rem', py: 0.5 }}
+                          >
+                            Excel
+                          </Button>
+                        </Tooltip>
+                      )}
+                    </ButtonGroup>
+                  </Box>
+                )}
+                
+                {/* Simple Table Display */}
+                {results && results.length > 0 ? (
+                  <Box 
+                    component="div" 
+                    sx={{ 
+                      overflow: 'auto',
+                      borderRadius: 1,
+                      border: '1px solid rgba(224, 224, 224, 0.4)',
+                      maxHeight: '300px',
+                      mb: 1,
+                      width: '100%',
+                      '&::-webkit-scrollbar': {
+                        height: '8px',
+                        width: '8px'
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(0,0,0,0.1)',
+                        borderRadius: '4px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(0,0,0,0.05)',
+                      }
+                    }}
+                  >
+                    <Table 
+                      size="small" 
+                      aria-label="SQL query results" 
+                      sx={{ 
+                        tableLayout: 'auto', 
+                        minWidth: columns.length * 120, 
+                        width: '100%',
+                        backgroundColor: theme.palette.background.paper
+                      }}
+                    >
+                      <TableHead>
+                        <TableRow>
+                          {columns.map((column) => (
+                            <TableCell 
+                              key={column} 
+                              sx={{ 
+                                fontWeight: 'bold',
+                                py: 0.5,
+                                px: 1,
+                                fontSize: '0.8rem',
+                                whiteSpace: 'nowrap',
+                                minWidth: '100px'
+                              }}
+                            >
+                              {column}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {results.slice(0, 5).map((row, index) => (
+                          <TableRow key={index}>
+                            {columns.map((column) => (
+                              <TableCell 
+                                key={`${index}-${column}`} 
+                                sx={{ 
+                                  py: 0.5, 
+                                  px: 1,
+                                  fontSize: '0.8rem',
+                                  minWidth: '100px',
+                                  maxWidth: '200px',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                <Tooltip title={row[column]?.toString() || ''}>
+                                  <span>{row[column]?.toString() || ''}</span>
+                                </Tooltip>
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))}
+                        {results.length > 5 && (
+                          <TableRow>
+                            <TableCell 
+                              colSpan={columns.length} 
+                              align="center"
+                              sx={{ py: 0.5, fontSize: '0.75rem', color: 'text.secondary' }}
+                            >
+                              {results.length - 5} more rows...
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </Box>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">No results returned</Typography>
+                )}
+              </>
+            )}
+          </Box>
+        </>
+      ) : (
+        // Original full-featured SQLResultView follows...
+        <>
+          {/* The header section with SQL query info */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', mb: 2 }}>
+            {/* SQL Header with Confidence Level */}
       <Box 
         sx={{ 
           display: 'flex', 
@@ -209,8 +403,14 @@ const SQLResultView = ({
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Code fontSize="small" sx={{ mr: 0.5 }} />
           <Typography variant="subtitle2">SQL Query</Typography>
+                <Chip 
+                  size="small" 
+                  label={`${confidence ? Math.round(confidence * 100) : 0}% confident`} 
+                  color={confidenceInfo.color} 
+                  icon={confidenceInfo.icon} 
+                  sx={{ ml: 1, height: 20, fontSize: '0.75rem' }}
+                />
           <IconButton 
             size="small" 
             onClick={toggleSql} 
@@ -221,14 +421,14 @@ const SQLResultView = ({
           </IconButton>
         </Box>
         
-        <Tooltip title={`Confidence: ${Math.round(confidence * 100)}%`}>
-          <Chip 
-            label={`${Math.round(confidence * 100)}% confident`} 
+              <Tooltip title="View syntax highlighted SQL">
+                <IconButton 
             size="small" 
-            color={confidenceInfo.color}
-            icon={confidenceInfo.icon}
-            sx={{ height: 24 }}
-          />
+                  onClick={toggleSql}
+                  aria-label="SQL code"
+                >
+                  <Code fontSize="small" />
+                </IconButton>
         </Tooltip>
       </Box>
       
@@ -237,7 +437,7 @@ const SQLResultView = ({
         <Box sx={{ mb: 2 }}>
           <SyntaxHighlighter 
             language="sql" 
-            style={vscDarkPlus}
+                  style={syntaxTheme}
             customStyle={{ 
               margin: 0, 
               borderRadius: '4px',
@@ -249,6 +449,7 @@ const SQLResultView = ({
           </SyntaxHighlighter>
         </Box>
       </Collapse>
+          </Box>
       
       {/* Explanation Section */}
       <Box 
@@ -304,6 +505,7 @@ const SQLResultView = ({
                   CSV
                 </Button>
               </Tooltip>
+                  {XLSX && (
               <Tooltip title="Download as Excel">
                 <Button
                   startIcon={<Article />}
@@ -313,6 +515,7 @@ const SQLResultView = ({
                   Excel
                 </Button>
               </Tooltip>
+                  )}
             </ButtonGroup>
           </Box>
           <TableContainer sx={{ maxHeight: 400, overflowX: 'auto' }}>
@@ -353,7 +556,7 @@ const SQLResultView = ({
               </TableHead>
               <TableBody>
                 {results
-                  .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                      .slice(startIndex, endIndex)
                   .map((row, index) => (
                     <TableRow 
                       key={index} 
@@ -398,11 +601,6 @@ const SQLResultView = ({
                       })}
                     </TableRow>
                   ))}
-                {emptyRows > 0 && (
-                  <TableRow style={{ height: 33 * emptyRows }}>
-                    <TableCell colSpan={columns.length} />
-                  </TableRow>
-                )}
               </TableBody>
             </Table>
           </TableContainer>
@@ -439,6 +637,8 @@ const SQLResultView = ({
       
       {/* Visualization Section */}
       {visualization && renderVisualization()}
+        </>
+      )}
     </Box>
   );
 };

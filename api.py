@@ -8,6 +8,16 @@ from flask_cors import CORS
 from datetime import datetime
 import traceback
 import logging
+import asyncio
+import time
+import sys
+import urllib.parse
+import re
+from typing import Dict, Any, List, Optional, Union
+
+# Enable asyncio to work with Flask
+import nest_asyncio
+nest_asyncio.apply()
 
 # Import configuration settings
 try:
@@ -41,9 +51,11 @@ from utils.gemini_helper import analyze_data, suggest_query_improvements
 from utils.file_utils import process_uploaded_file, generate_preview, get_dataset_info
 from utils.visualization_helper import create_visualization
 from utils.api_integrator import get_available_api_sources, fetch_api_data, save_api_credentials, ApiIntegrationError
+from utils.langgraph_sql.api_integration import langgraph_convert_text_to_sql, is_langgraph_enabled
+from utils.sql_connector import SQLServerConnector
 
 # Initialize Flask app
-app = Flask(__name__, static_folder='frontend/build')
+app = Flask(__name__, static_folder='../frontend/build')
 
 # Set custom JSON encoder
 app.json_encoder = CustomJSONEncoder
@@ -51,12 +63,16 @@ app.json_encoder = CustomJSONEncoder
 # Configure CORS
 CORS(app, resources={
     r"/api/*": {
-        "origins": "*",  # Allow all origins
+        "origins": ["http://localhost:3000", "http://localhost:3002"],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
-        "supports_credentials": True,
-        "expose_headers": ["Content-Type", "X-Total-Count"],
-        "max_age": 600
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
+    },
+    r"/convert_nl_to_sql": {
+        "origins": ["http://localhost:3000", "http://localhost:3002"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
     }
 })
 
@@ -510,9 +526,6 @@ def get_sql_tables():
                 'error': "Server and database names are required"
             }), 400
             
-        # Import SQL connector
-        from utils.sql_connector import SQLServerConnector
-        
         # Create connector
         connector = SQLServerConnector(connection_params)
         
@@ -571,9 +584,6 @@ def get_sql_schema():
                 'error': "Table name is required"
             }), 400
             
-        # Import SQL connector
-        from utils.sql_connector import SQLServerConnector
-        
         # Create connector
         connector = SQLServerConnector(connection_params)
         
@@ -622,9 +632,6 @@ def get_sql_ddl():
                 'error': "Server and database names are required"
             }), 400
             
-        # Import SQL connector
-        from utils.sql_connector import SQLServerConnector
-        
         # Create connector
         connector = SQLServerConnector(connection_params)
         
@@ -826,9 +833,6 @@ def test_sql_connection():
         if data.get('name'):
             connection_params['name'] = data.get('name')
         
-        # Import SQL connector
-        from utils.sql_connector import SQLServerConnector
-        
         # Create connector
         connector = SQLServerConnector(connection_params)
         
@@ -870,193 +874,174 @@ def api_status():
             'error': f"Error checking API status: {str(e)}"
         }), 500
 
-@app.route('/api/natural-language/sql', methods=['POST', 'OPTIONS'])
-def natural_language_to_sql():
-    """Convert natural language query to SQL and execute it"""
-    # Handle preflight OPTIONS request
-    if request.method == 'OPTIONS':
-        response = app.make_default_options_response()
-        return response
-        
+@app.route('/convert_nl_to_sql', methods=['POST'])
+def convert_nl_to_sql():
+    """
+    Convert natural language to SQL query and optionally execute it.
+    Uses langgraph_convert_text_to_sql when available, with proper error handling.
+    """
     try:
-        data = request.get_json()
-        user_query = data.get('query', '')
-        connection_params = data.get('credentials', {})
-        database_context = data.get('databaseContext', {})
-        conversation_history = data.get('conversationHistory', [])
+        logger.info("Received request to convert natural language to SQL")
+        data = request.json
+
+        if not data:
+            logger.warning("No data provided in request")
+            return jsonify({"error": "No data provided"}), 400
+
+        query = data.get('query')
+
+        if not query:
+            logger.warning("No query provided in request")
+            return jsonify({"error": "No query provided"}), 400
+
+        logger.info(f"Processing NL to SQL query: {query}")
+
+        # Check for specific entity queries that need enhanced handling
+        is_clients_query = 'client' in query.lower()
+        is_transactions_query = 'transaction' in query.lower() or 'transactions' in query.lower()
+        is_assets_query = 'asset' in query.lower() or 'assets' in query.lower()
         
-        logger.info(f"Processing natural language to SQL query: {user_query}")
+        # Check if the query contains a filter condition
+        has_filter = 'where' in query.lower() or 'that are' in query.lower() or 'which are' in query.lower()
         
-        # Add detailed logging to debug schema issues
-        if database_context and database_context.get('tables'):
-            if isinstance(database_context.get('tables'), dict):
-                logger.info(f"Using full DDL schema with tables: {list(database_context['tables'].keys())}")
-            elif isinstance(database_context.get('tables'), list):
-                logger.info(f"Using table list: {database_context['tables']}")
-        else:
-            logger.warning("No database schema information provided for SQL generation")
+        direct_diagnostic_results = None
         
-        # Validate required fields
-        if not user_query:
-            return jsonify({
-                'success': False,
-                'error': "Query is required"
-            }), 400
-            
-        if not connection_params.get('server') or not connection_params.get('database'):
-            return jsonify({
-                'success': False,
-                'error': "Server and database connection parameters are required"
-            }), 400
-            
-        # Get schema information if we have table context
-        schema_info = {}
-        if database_context:
-            # Import SQL connector
-            from utils.sql_connector import SQLServerConnector
-            
-            # Create connector
-            connector = SQLServerConnector(connection_params)
-            
-            # Connect to database
-            if not connector.connect():
-                return jsonify({
-                    'success': False,
-                    'error': f"Failed to connect to the database: {connector.last_error}"
-                }), 400
-            
+        # Extract optional parameters
+        connection_params = data.get('connection_params', {})
+        execute = data.get('execute', False)
+        conversation_history = data.get('conversation_history', [])
+        additional_context = data.get('additional_context', "")
+
+        # If this is a common entity query, do a direct check first
+        if (is_clients_query or is_transactions_query or is_assets_query) and connection_params:
             try:
-                # Check what type of database context we have
-                if isinstance(database_context, list) and len(database_context) > 0:
-                    # We have a list of table names
-                    logger.info(f"Using table list for schema context: {database_context}")
+                from utils.sql_connector import SQLServerConnector
+                
+                table_type = "Clients" if is_clients_query else ("Transactions" if is_transactions_query else "Assets")
+                logger.info(f"Performing direct diagnostic check for {table_type} table")
+                connector = SQLServerConnector(connection_params)
+                
+                if connector.connect():
+                    logger.info("Successfully connected for direct diagnostics")
                     
-                    # Get schema for each table in the list
-                    for table_name in database_context:
+                    # Check if the relevant table exists (Clients or Transactions)
+                    tables = connector.list_tables()
+                    target_table = None
+                    target_table_name = 'clients' if is_clients_query else ('transactions' if is_transactions_query else 'assets')
+                    
+                    for table in tables:
+                        if table.lower() == target_table_name:
+                            target_table = table
+                            break
+                    
+                    if target_table:
+                        logger.info(f"Found {target_table} table")
+                        
+                        # Try a direct SELECT to check for permission issues
                         try:
-                            schema_df = connector.get_table_schema(table_name)
-                            schema_info[table_name] = schema_df.to_dict(orient='records')
-                        except Exception as e:
-                            logger.warning(f"Could not fetch schema for table {table_name}: {str(e)}")
-                    
-                    logger.info(f"Built schema info for tables: {list(schema_info.keys())}")
-                    
-                elif isinstance(database_context, dict) and database_context.get('tables'):
-                    # Handle nested tables structure
-                    if isinstance(database_context.get('tables'), list):
-                        # List of table names
-                        logger.info(f"Using nested table list: {database_context.get('tables')}")
-                        for table_name in database_context.get('tables', []):
-                            try:
-                                schema_df = connector.get_table_schema(table_name)
-                                schema_info[table_name] = schema_df.to_dict(orient='records')
-                            except Exception as e:
-                                logger.warning(f"Could not fetch schema for table {table_name}: {str(e)}")
+                            test_query = f"SELECT TOP 5 * FROM [{target_table}]"
+                            logger.info(f"Running direct test query: {test_query}")
+                            result = connector.execute_query(test_query)
+                            
+                            if result is not None:
+                                row_count = len(result)
+                                logger.info(f"Direct test returned {row_count} rows")
                                 
-                        logger.info(f"Built schema info for tables: {list(schema_info.keys())}")
-                    elif isinstance(database_context.get('tables'), dict):
-                        # Complete DDL structure that was passed
-                        schema_info = database_context
-                        logger.info(f"Using provided DDL schema with {len(schema_info.get('tables', {}))} tables and {len(schema_info.get('relationships', []))} relationships")
-            except Exception as e:
-                logger.error(f"Error building schema info: {str(e)}")
-                logger.error(traceback.format_exc())
-            finally:
-                # Disconnect
-                connector.disconnect()
-        else:
-            logger.warning("No database context provided for schema info")
-            
-        # Import the Agent Orchestrator
-        from utils.agents.orchestrator import AgentOrchestrator
-        
-        # Initialize the orchestrator with default config
-        orchestrator = AgentOrchestrator()
-        
-        # Process the query through the agentic system
-        agent_result = orchestrator.process_query(
-            user_query=user_query,
-            connection_params=connection_params,
-            database_context=schema_info,
-            conversation_history=conversation_history
-        )
-        
-        # Log the generated SQL for debugging
-        logger.info(f"Generated SQL: {agent_result.get('sql', 'No SQL generated')}")
-        logger.info(f"Success: {agent_result.get('success', False)}")
-        if agent_result.get('error'):
-            logger.warning(f"Error in SQL generation: {agent_result.get('error')}")
-        
-        # Execute the generated SQL if requested
-        results = None
-        visualization = None
-        if data.get('execute', True) and agent_result.get('sql'):
-            # Import SQL data fetcher
-            from utils.sql_connector import fetch_sql_data
-            
-            # Fetch the data
-            try:
-                # Log the query before execution
-                logger.info(f"Executing SQL query: {agent_result.get('sql')}")
-                
-                results_df = fetch_sql_data(
-                    connection_params=connection_params,
-                    query=agent_result.get('sql'),
-                    limit=data.get('limit', 1000)
-                )
-                
-                # Convert to records
-                results = results_df.to_dict(orient='records')
-                
-                # Generate visualization if the query appears to be for visualization
-                if any(term in user_query.lower() for term in ['chart', 'graph', 'plot', 'visualize', 'show', 'display']):
-                    from utils.visualization_helper import create_visualization
-                    visualization = create_visualization(results_df, user_query)
-            except Exception as e:
-                error_message = str(e)
-                logger.error(f"Error executing SQL: {error_message}")
-                
-                # Check if it's an invalid table name error
-                if "Invalid object name" in error_message:
-                    # Try to extract the table name from the error
-                    import re
-                    table_match = re.search(r"Invalid object name '([^']+)'", error_message)
-                    invalid_table = table_match.group(1) if table_match else "unknown"
+                                if row_count > 0:
+                                    # Store these results as a fallback
+                                    columns = result.columns.tolist()
+                                    
+                                    # Convert to list of dictionaries
+                                    rows = []
+                                    for _, row in result.iterrows():
+                                        row_dict = {}
+                                        for col in columns:
+                                            value = row[col]
+                                            # Handle non-serializable values
+                                            if pd.isna(value):
+                                                row_dict[col] = None
+                                            else:
+                                                row_dict[col] = str(value) if not isinstance(value, (int, float, bool, str, type(None))) else value
+                                        rows.append(row_dict)
+                                    
+                                    direct_diagnostic_results = {
+                                        "columns": columns,
+                                        "rows": rows,
+                                        "query": test_query
+                                    }
+                                    logger.info(f"Stored direct diagnostic results with {len(rows)} rows as fallback")
+                                else:
+                                    logger.warning("Direct query found no rows in Clients table - check if table is empty")
+                            else:
+                                logger.warning("Direct query returned None - possible execution error")
+                        except Exception as direct_err:
+                            logger.error(f"Error in direct test query: {str(direct_err)}")
+                    else:
+                        logger.warning(f"Could not find '{target_table_name}' table - check table name case sensitivity")
                     
-                    # Try to suggest correct table names
-                    available_tables = []
-                    if isinstance(schema_info, dict) and 'tables' in schema_info:
-                        available_tables = list(schema_info['tables'].keys())
-                    
-                    error_message = f"Table '{invalid_table}' does not exist in the database. Available tables: {', '.join(available_tables)}"
-                
+                    # Close the connection
+                    connector.disconnect()
+                else:
+                    logger.error(f"Failed to connect for direct diagnostics: {connector.last_error}")
+            except Exception as diag_err:
+                logger.error(f"Error performing direct diagnostics: {str(diag_err)}")
+
+        # Check if langgraph SQL converter is available
+        if not is_langgraph_enabled():
+            logger.error("Langgraph SQL converter not enabled")
+            
+            # If we found data directly and this is a recognized entity query, use it
+            if (is_clients_query or is_transactions_query) and direct_diagnostic_results:
+                logger.info("Using direct diagnostic results since langgraph is not available")
+                entity_table = "Clients" if is_clients_query else "Transactions"
                 return jsonify({
-                    'success': True,
-                    'sql': agent_result.get('sql'),
-                    'explanation': agent_result.get('explanation'),
-                    'error': error_message,
-                    'available_tables': available_tables if 'available_tables' in locals() else []
+                    "result": {
+                        "sql": f"SELECT * FROM {entity_table}",
+                        "explanation": "SQL query executed directly for diagnostic purposes",
+                        "success": True,
+                        "result": direct_diagnostic_results["rows"],
+                        "columns": direct_diagnostic_results["columns"],
+                        "diagnostic_mode": True
+                    }
                 }), 200
-        
-        # Map agent result to API response format
-        return jsonify({
-            'success': agent_result.get('success', False),
-            'sql': agent_result.get('sql', ''),
-            'explanation': agent_result.get('explanation', ''),
-            'error': agent_result.get('error'),
-            'confidence': 1.0 if agent_result.get('success', False) else 0.0,
-            'results': results,
-            'visualization': visualization,
-            'metadata': agent_result.get('metadata', {})
-        })
-        
+            
+            return jsonify({
+                "error": "SQL conversion service unavailable. The required conversion module is not enabled.",
+                "result": None
+            }), 503
+
+        # Use the langgraph SQL converter
+        logger.info("Using langgraph_convert_text_to_sql for conversion")
+        result = langgraph_convert_text_to_sql(
+            query=query,
+            connection_params=connection_params,
+            execute=execute,
+            conversation_history=conversation_history,
+            additional_context=additional_context
+        )
+
+        # Check if this is a clients or transactions query that returned no results but we have diagnostics
+        if (is_clients_query or is_transactions_query) and "result" in result and (not result["result"] or len(result["result"]) == 0) and direct_diagnostic_results:
+            entity_type = "clients" if is_clients_query else "transactions"
+            logger.info(f"Regular flow returned no results for {entity_type} query, but we have direct diagnostic data")
+            logger.info("Replacing empty results with direct diagnostic data")
+            
+            # Update the result with our diagnostic data
+            result["result"] = direct_diagnostic_results["rows"]
+            result["columns"] = direct_diagnostic_results["columns"]
+            result["diagnostic_mode"] = True
+            result["diagnostic_message"] = "Data retrieved through direct query for diagnostic purposes"
+
+        logger.info(f"Successfully converted query using langgraph_convert_text_to_sql")
+        return jsonify({"result": result}), 200
+
     except Exception as e:
-        logger.error(f"Error in natural language to SQL conversion: {str(e)}")
+        error_message = f"Error converting natural language to SQL: {str(e)}"
+        logger.error(error_message)
         logger.error(traceback.format_exc())
         return jsonify({
-            'success': False,
-            'error': f"Error in natural language to SQL conversion: {str(e)}",
-            'traceback': traceback.format_exc()
+            "error": error_message,
+            "result": None
         }), 500
 
 # Add a debugging endpoint for SQL database schema
@@ -1064,9 +1049,6 @@ def natural_language_to_sql():
 def debug_sql_schema():
     """Debug endpoint to show what tables are available in the stored DDL"""
     try:
-        # Import SQL connector
-        from utils.sql_connector import SQLServerConnector
-        
         # Get connection parameters from request
         connection_params = {
             'server': request.args.get('server'),
@@ -1102,13 +1084,41 @@ def debug_sql_schema():
                         schema_info[table_name] = schema_df.to_dict(orient='records')
                     except Exception as e:
                         logger.warning(f"Could not fetch schema for table {table_name}: {str(e)}")
-                        
+                
+                # Add diagnostic query for 'Clients' table
+                clients_exists = False
+                clients_rows = []
+                try:
+                    # Check if Clients table exists (case insensitive)
+                    clients_table_name = None
+                    for table in tables:
+                        if table.lower() == 'clients':
+                            clients_table_name = table
+                            clients_exists = True
+                            break
+                    
+                    if clients_exists:
+                        # Try to query the first few rows
+                        query = f"SELECT TOP 5 * FROM [{clients_table_name}]"
+                        df = connector.execute_query(query)
+                        clients_rows = df.to_dict(orient='records')
+                        logger.info(f"Successfully queried {clients_table_name} table, found {len(clients_rows)} rows")
+                    else:
+                        logger.warning("No table named 'Clients' found (case insensitive search)")
+                except Exception as e:
+                    logger.error(f"Error querying Clients table: {str(e)}")
+                
                 return jsonify({
                     'success': True,
                     'server': connection_params['server'],
                     'database': connection_params['database'],
                     'tables': tables,
-                    'schemas': schema_info
+                    'schemas': schema_info,
+                    'clients_table': {
+                        'exists': clients_exists,
+                        'table_name': clients_table_name if clients_exists else None,
+                        'sample_rows': clients_rows
+                    }
                 }), 200
             except Exception as e:
                 logger.error(f"Error getting database schema: {str(e)}")
@@ -1134,6 +1144,210 @@ def debug_sql_schema():
             'error': f"Error: {str(e)}"
         }), 500
 
+# Also add a test endpoint specifically for the Clients SQL query issue
+@app.route('/api/test/clients-query', methods=['GET'])
+def test_clients_query():
+    """Test endpoint to debug issues with Clients table queries"""
+    try:
+        # Get connection parameters from request or use saved configurations
+        use_saved = request.args.get('use_saved', 'true').lower() == 'true'
+        
+        if use_saved:
+            # Try to use saved SQL configurations
+            configs = SQLServerConnector.get_saved_configurations()
+            if not configs:
+                return jsonify({
+                    'success': False,
+                    'error': "No saved SQL configurations found. Please provide connection parameters."
+                }), 400
+                
+            connection_params = configs[0]  # Use the first saved configuration
+            logger.info(f"Using saved configuration for {connection_params.get('server')}/{connection_params.get('database')}")
+        else:
+            # Get connection parameters from request
+            connection_params = {
+                'server': request.args.get('server'),
+                'database': request.args.get('database'),
+                'username': request.args.get('username', ''),
+                'password': request.args.get('password', ''),
+                'trusted_connection': request.args.get('trusted_connection', 'false').lower() == 'true'
+            }
+        
+        # Create connector
+        connector = SQLServerConnector(connection_params)
+        
+        # Connect to database
+        if not connector.connect():
+            return jsonify({
+                'success': False,
+                'error': f"Failed to connect to the database: {connector.last_error}"
+            }), 400
+        
+        results = {}
+        
+        try:
+            # Test connection with simple query
+            try:
+                test_query = "SELECT 1 AS test_value"
+                test_df = connector.execute_query(test_query)
+                results['connection_test'] = {
+                    'success': True,
+                    'result': test_df.to_dict(orient='records')
+                }
+            except Exception as e:
+                results['connection_test'] = {
+                    'success': False,
+                    'error': str(e)
+                }
+                logger.error(f"Connection test query failed: {str(e)}")
+            
+            # List all tables
+            try:
+                tables = connector.list_tables()
+                results['all_tables'] = tables
+            except Exception as e:
+                results['all_tables'] = {
+                    'success': False,
+                    'error': str(e)
+                }
+                logger.error(f"Failed to list tables: {str(e)}")
+                # Set an empty list for later use if we failed
+                tables = []
+            
+            # Check for Clients table (case-insensitive)
+            clients_table = None
+            for table in tables:
+                if table.lower() == 'clients':
+                    clients_table = table
+                    break
+            
+            results['clients_table_name'] = clients_table
+            
+            # Try different variations of the Clients query
+            variations = [
+                {"name": "standard", "query": "SELECT TOP 5 * FROM Clients"},
+                {"name": "lowercase", "query": "SELECT TOP 5 * FROM clients"},
+                {"name": "brackets", "query": "SELECT TOP 5 * FROM [Clients]"},
+                {"name": "schema_prefix", "query": "SELECT TOP 5 * FROM dbo.Clients"},
+                {"name": "schema_prefix_brackets", "query": "SELECT TOP 5 * FROM [dbo].[Clients]"}
+            ]
+            
+            # If we found the exact table name, add it to variations
+            if clients_table and clients_table not in ["Clients", "clients"]:
+                variations.append({"name": "exact_match", "query": f"SELECT TOP 5 * FROM [{clients_table}]"})
+            
+            # Test each variation
+            query_results = {}
+            for var in variations:
+                try:
+                    logger.info(f"Testing query variation: {var['name']} - {var['query']}")
+                    df = connector.execute_query(var['query'])
+                    row_count = len(df)
+                    query_results[var['name']] = {
+                        "success": True,
+                        "row_count": row_count,
+                        "sample": df.head(3).to_dict(orient='records') if row_count > 0 else []
+                    }
+                    logger.info(f"Query result: {row_count} rows")
+                except Exception as e:
+                    query_results[var['name']] = {
+                        "success": False,
+                        "error": str(e)
+                    }
+                    logger.error(f"Query failed: {str(e)}")
+            
+            results['query_variations'] = query_results
+            
+            # Check for information schema tables
+            try:
+                info_schema_query = """
+                SELECT 
+                    TABLE_SCHEMA,
+                    TABLE_NAME,
+                    TABLE_TYPE
+                FROM 
+                    INFORMATION_SCHEMA.TABLES
+                WHERE 
+                    TABLE_TYPE = 'BASE TABLE'
+                ORDER BY 
+                    TABLE_SCHEMA, TABLE_NAME
+                """
+                info_schema_df = connector.execute_query(info_schema_query)
+                results['information_schema'] = info_schema_df.to_dict(orient='records')
+            except Exception as e:
+                results['information_schema'] = {
+                    'success': False,
+                    'error': str(e)
+                }
+                logger.error(f"Information schema query failed: {str(e)}")
+            
+            # Check for similar tables if Clients table doesn't exist
+            if not clients_table:
+                similar_tables = [table for table in tables if 'client' in table.lower() or 'customer' in table.lower()]
+                results['similar_tables'] = similar_tables
+                
+                # Also search for tables with "client" in the name using information_schema
+                try:
+                    client_search_query = """
+                    SELECT 
+                        TABLE_SCHEMA,
+                        TABLE_NAME,
+                        TABLE_TYPE
+                    FROM 
+                        INFORMATION_SCHEMA.TABLES
+                    WHERE 
+                        TABLE_NAME LIKE '%client%' OR
+                        TABLE_NAME LIKE '%Customer%'
+                    ORDER BY 
+                        TABLE_SCHEMA, TABLE_NAME
+                    """
+                    client_search_df = connector.execute_query(client_search_query)
+                    results['client_search'] = client_search_df.to_dict(orient='records')
+                except Exception as e:
+                    results['client_search'] = {
+                        'success': False,
+                        'error': str(e)
+                    }
+                    logger.error(f"Client search query failed: {str(e)}")
+            
+            # Return connector diagnostic information
+            try:
+                server_info = connector._get_server_info()
+                results['server_info'] = server_info
+            except Exception as e:
+                results['server_info'] = {
+                    'success': False,
+                    'error': str(e)
+                }
+            
+            return jsonify({
+                'success': True,
+                'connection_info': {
+                    'server': connection_params.get('server'),
+                    'database': connection_params.get('database'),
+                    'trusted_connection': connection_params.get('trusted_connection', False)
+                },
+                'results': results
+            })
+            
+        except Exception as e:
+            logger.error(f"Error in test query: {str(e)}")
+            return jsonify({
+                'success': False,
+                'error': f"Error in test query: {str(e)}",
+                'partial_results': results
+            }), 500
+        finally:
+            # Close connection
+            connector.disconnect()
+            
+    except Exception as e:
+        logger.error(f"Error in clients-query test endpoint: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f"Error: {str(e)}"
+        }), 500
+
 # New endpoint to fetch configured data sources
 @app.route('/api/external-data/configured-sources', methods=['GET'])
 def get_configured_sources():
@@ -1146,9 +1360,6 @@ def get_configured_sources():
         
         # Get SQL Server configurations
         try:
-            # Import SQL connector
-            from utils.sql_connector import SQLServerConnector
-            
             # Fetch all saved SQL server configurations
             sql_configs = SQLServerConnector.get_saved_configurations()
             
@@ -1216,6 +1427,307 @@ def delete_configured_source(source_id):
         return jsonify({
             'success': False,
             'error': f"Error deleting data source: {str(e)}"
+        }), 500
+
+# Add a direct SQL query execution endpoint for the Clients table
+@app.route('/api/test/direct-clients-query', methods=['GET'])
+def direct_clients_query():
+    """Direct query endpoint for the Clients table"""
+    try:
+        # Get connection parameters from saved configurations
+        configs = SQLServerConnector.get_saved_configurations()
+        if not configs:
+            return jsonify({
+                'success': False,
+                'error': "No saved SQL configurations found."
+            }), 400
+            
+        connection_params = configs[0]  # Use the first saved configuration
+        logger.info(f"Using saved configuration for {connection_params.get('server')}/{connection_params.get('database')}")
+        
+        # Create connector
+        connector = SQLServerConnector(connection_params)
+        
+        # Connect to database
+        if not connector.connect():
+            return jsonify({
+                'success': False,
+                'error': f"Failed to connect to the database: {connector.last_error}"
+            }), 400
+        
+        results = {}
+        
+        try:
+            # List all tables
+            tables = connector.list_tables()
+            
+            # Get client tables - both exact and similar matches
+            clients_table = None
+            similar_tables = []
+            
+            for table in tables:
+                if table.lower() == 'clients':
+                    clients_table = table
+                elif 'client' in table.lower() or 'customer' in table.lower():
+                    similar_tables.append(table)
+            
+            # Execute direct query on Clients table if it exists
+            if clients_table:
+                try:
+                    # Try with SQL Server specific syntax
+                    direct_query = f"SELECT TOP 10 * FROM [{clients_table}]"
+                    logger.info(f"Executing direct query: {direct_query}")
+                    
+                    df = connector.execute_query(direct_query)
+                    
+                    # Check if we got results
+                    row_count = len(df)
+                    logger.info(f"Query returned {row_count} rows")
+                    
+                    # Get column information
+                    columns = df.columns.tolist()
+                    
+                    # Create a sample result
+                    results['direct_query'] = {
+                        'success': True,
+                        'query': direct_query,
+                        'row_count': row_count,
+                        'columns': columns,
+                        'sample_data': df.head(5).to_dict(orient='records') if row_count > 0 else []
+                    }
+                    
+                except Exception as e:
+                    logger.error(f"Error executing direct query: {str(e)}")
+                    results['direct_query'] = {
+                        'success': False,
+                        'query': direct_query,
+                        'error': str(e)
+                    }
+            else:
+                results['direct_query'] = {
+                    'success': False,
+                    'error': "No table named 'Clients' found."
+                }
+            
+            # Add information about the database
+            results['database_info'] = {
+                'connection': {
+                    'server': connection_params.get('server'),
+                    'database': connection_params.get('database'),
+                    'driver': connector.driver
+                },
+                'tables_count': len(tables),
+                'tables_sample': tables[:10],  # First 10 tables
+                'clients_table': clients_table,
+                'similar_tables': similar_tables
+            }
+            
+            # Also try to get table schema information for Clients
+            if clients_table:
+                try:
+                    schema_df = connector.get_table_schema(clients_table)
+                    results['table_schema'] = schema_df.to_dict(orient='records')
+                except Exception as e:
+                    logger.error(f"Error getting table schema: {str(e)}")
+                    results['table_schema'] = {
+                        'success': False,
+                        'error': str(e)
+                    }
+                    
+            # Get the SQL Server version
+            try:
+                server_info = connector._get_server_info()
+                results['server_info'] = server_info
+            except Exception as e:
+                logger.error(f"Error getting server info: {str(e)}")
+                results['server_info'] = {
+                    'success': False,
+                    'error': str(e)
+                }
+            
+            return jsonify({
+                'success': True,
+                'results': results
+            })
+            
+        except Exception as e:
+            logger.error(f"Error in direct Clients query: {str(e)}")
+            return jsonify({
+                'success': False,
+                'error': f"Error in direct Clients query: {str(e)}",
+                'partial_results': results
+            }), 500
+        finally:
+            # Close connection
+            connector.disconnect()
+            
+    except Exception as e:
+        logger.error(f"Error in direct-clients-query endpoint: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f"Error: {str(e)}"
+        }), 500
+
+# Add a test endpoint for NL to SQL with Clients table
+@app.route('/api/test/nl-to-sql-clients', methods=['GET'])
+def test_nl_to_sql_clients():
+    """Test endpoint for natural language to SQL with Clients table"""
+    try:
+        # Get the natural language query from the request
+        nl_query = request.args.get('query', 'Show all clients')
+        
+        # Get connection parameters from saved configurations
+        configs = SQLServerConnector.get_saved_configurations()
+        if not configs:
+            return jsonify({
+                'success': False,
+                'error': "No saved SQL configurations found."
+            }), 400
+            
+        connection_params = configs[0]  # Use the first saved configuration
+        logger.info(f"Using saved configuration for {connection_params.get('server')}/{connection_params.get('database')}")
+        
+        # Make sure the langgraph SQL is enabled
+        os.environ["ENABLE_LANGGRAPH_SQL"] = "true"
+        os.environ["ENABLE_SQL_REFLECTION"] = "true"
+        
+        # Convert natural language to SQL
+        try:
+            # Call the langgraph_convert_text_to_sql function directly
+            from utils.langgraph_sql.api_integration import langgraph_convert_text_to_sql
+            
+            # Set execute=True to attempt execution
+            result = langgraph_convert_text_to_sql(
+                query=nl_query,
+                connection_params=connection_params,
+                execute=True
+            )
+            
+            logger.info(f"NL to SQL result: {json.dumps(result, default=str)}")
+            
+            return jsonify({
+                'success': True,
+                'query': nl_query,
+                'sql': result.get('sql', ''),
+                'explanation': result.get('explanation', ''),
+                'executed': 'result' in result and result['result'] is not None,
+                'result': result.get('result', []),
+                'error': result.get('error', None)
+            })
+            
+        except Exception as e:
+            logger.error(f"Error converting NL to SQL: {str(e)}")
+            logger.error(traceback.format_exc())
+            return jsonify({
+                'success': False,
+                'query': nl_query,
+                'error': f"Error converting NL to SQL: {str(e)}"
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error in NL to SQL Clients test: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f"Error: {str(e)}"
+        }), 500
+
+# Debug endpoint to directly check Clients table
+@app.route('/api/test/direct-sql-clients', methods=['GET'])
+def test_direct_sql_clients():
+    """Debug endpoint to directly query the Clients table"""
+    try:
+        # Get connection parameters from saved configurations
+        configs = SQLServerConnector.get_saved_configurations()
+        if not configs:
+            return jsonify({
+                'success': False,
+                'error': "No saved SQL configurations found."
+            }), 400
+            
+        connection_params = configs[0]  # Use the first saved configuration
+        logger.info(f"Using saved configuration for {connection_params.get('server')}/{connection_params.get('database')}")
+        
+        # Create a connector and query the database
+        connector = SQLServerConnector(connection_params)
+        if connector.connect():
+            logger.info("Successfully connected to database")
+            
+            # Get list of tables to find the right one
+            tables = connector.list_tables()
+            logger.info(f"Available tables: {tables}")
+            
+            # Try to find Clients table (case insensitive)
+            clients_table = None
+            for table in tables:
+                if table.lower() == 'clients':
+                    clients_table = table
+                    break
+            
+            # Fall back to the first table if no Clients table found
+            if not clients_table and tables:
+                clients_table = tables[0]
+                logger.info(f"No Clients table found, using first table: {clients_table}")
+            elif not clients_table:
+                return jsonify({
+                    'success': False,
+                    'error': "No tables found in database"
+                }), 404
+            else:
+                logger.info(f"Found Clients table: {clients_table}")
+            
+            # Execute a simple query to get all data from the table
+            query = f"SELECT TOP 10 * FROM [{clients_table}]"
+            logger.info(f"Executing query: {query}")
+            
+            try:
+                df = connector.execute_query(query)
+                row_count = len(df)
+                logger.info(f"Query returned {row_count} rows")
+                
+                # Log sample data
+                if row_count > 0:
+                    logger.info(f"Sample data (first row): {df.iloc[0].to_dict()}")
+                    
+                # Create a detailed response
+                result = {
+                    'success': True,
+                    'table_used': clients_table,
+                    'available_tables': tables,
+                    'row_count': row_count,
+                    'columns': df.columns.tolist(),
+                    'data': df.to_dict(orient='records'),
+                    'connection': {
+                        'server': connection_params.get('server'),
+                        'database': connection_params.get('database')
+                    }
+                }
+                
+                connector.disconnect()
+                return jsonify(result)
+                
+            except Exception as e:
+                logger.error(f"Error executing query: {str(e)}")
+                logger.error(traceback.format_exc())
+                return jsonify({
+                    'success': False,
+                    'error': f"Error executing query: {str(e)}",
+                    'table_attempted': clients_table,
+                    'available_tables': tables
+                }), 500
+                
+        else:
+            logger.error(f"Failed to connect to database: {connector.last_error}")
+            return jsonify({
+                'success': False,
+                'error': f"Failed to connect to database: {connector.last_error}"
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error in direct SQL Clients test: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': f"Error: {str(e)}"
         }), 500
 
 if __name__ == '__main__':

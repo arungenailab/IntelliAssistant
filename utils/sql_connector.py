@@ -237,7 +237,8 @@ class SQLServerConnector:
             str: The connection string
         """
         # Check if using Windows Authentication or SQL Authentication
-        if self.connection_params.get('trusted_connection', 'no').lower() == 'yes':
+        trusted_connection = str(self.connection_params.get('trusted_connection', 'no')).lower()
+        if trusted_connection in ['yes', 'true', '1']:
             # Windows Authentication
             conn_str = (
                 f"Driver={{{driver}}};"
@@ -392,12 +393,18 @@ class SQLServerConnector:
             DataFrame: Query results
         """
         if not self.is_connected:
+            logger.info(f"Not connected to database, attempting to connect now...")
             if not self.connect():
+                logger.error(f"Failed to connect to database: {self.last_error}")
                 raise Exception(f"Failed to connect to database: {self.last_error}")
-                
+        
+        # Log connection status and parameters
+        logger.info(f"Connection status: {self.is_connected}")
+        logger.info(f"Connection params: Server={self.connection_params.get('server')}, Database={self.connection_params.get('database')}")
+        
+        limited_query = query
         try:
             # Apply row limit if specified
-            limited_query = query
             if limit is not None:
                 # Only apply limit if not already limited with TOP
                 if "TOP " not in query.upper() and "LIMIT " not in query.upper():
@@ -412,6 +419,7 @@ class SQLServerConnector:
                         limited_query = query
             
             # Validate the query against the database schema
+            logger.info(f"Validating query: {limited_query}")
             validation_result = self.validate_query_columns(limited_query)
             if not validation_result['valid']:
                 error_message = f"Query contains invalid columns: {', '.join(validation_result['invalid_columns'])}"
@@ -421,11 +429,69 @@ class SQLServerConnector:
             
             # Execute the query
             logger.info(f"Executing query: {limited_query}")
+            
+            # First run a simple test query to verify connection is still active
+            try:
+                test_df = pd.read_sql_query("SELECT 1 AS test", self.connection)
+                logger.info(f"Connection test successful, got: {test_df}")
+            except Exception as test_e:
+                logger.warning(f"Connection test failed: {str(test_e)}. Attempting to reconnect...")
+                self.disconnect()
+                if not self.connect():
+                    logger.error(f"Failed to reconnect to database: {self.last_error}")
+                    raise Exception(f"Failed to reconnect to database: {self.last_error}")
+                logger.info("Reconnected successfully")
+            
+            # Now run the actual query
             df = pd.read_sql_query(limited_query, self.connection, params=params)
+            
+            # Log results
+            row_count = len(df) if df is not None else 0
+            logger.info(f"Query executed successfully. Returned {row_count} rows.")
+            if row_count == 0:
+                # If no results, try to check if the table exists and has data
+                if "FROM " in limited_query.upper():
+                    table_name = re.search(r'FROM\s+([^\s,;()]+)', limited_query, re.IGNORECASE)
+                    if table_name:
+                        table = table_name.group(1).strip('[]"\'`')
+                        logger.info(f"No results returned. Checking if table {table} exists and has data...")
+                        try:
+                            # Check if table exists
+                            table_check_query = """
+                            SELECT OBJECT_ID(?) as table_id
+                            """
+                            table_check_df = pd.read_sql_query(table_check_query, self.connection, params=[table])
+                            table_exists = not pd.isna(table_check_df.iloc[0]['table_id'])
+                            
+                            if not table_exists:
+                                logger.error(f"Table {table} does not exist in database {self.connection_params.get('database')}")
+                                raise Exception(f"Table {table} does not exist in database {self.connection_params.get('database')}")
+                            
+                            # If table exists, check row count
+                            count_query = f"SELECT COUNT(*) AS count FROM {table}"
+                            count_df = pd.read_sql_query(count_query, self.connection)
+                            row_count = count_df.iloc[0]['count']
+                            logger.info(f"Table {table} exists and has {row_count} rows")
+                            
+                            if row_count == 0:
+                                logger.warning(f"Table {table} exists but is empty")
+                            
+                            # Get sample of table structure
+                            structure_query = f"SELECT TOP 1 * FROM {table}"
+                            try:
+                                structure_df = pd.read_sql_query(structure_query, self.connection)
+                                logger.info(f"Table structure: Columns = {list(structure_df.columns)}")
+                            except Exception as struct_e:
+                                logger.warning(f"Could not get table structure: {str(struct_e)}")
+                            
+                        except Exception as ce:
+                            logger.error(f"Error checking table: {str(ce)}")
+            
             return df
         except Exception as e:
             logger.error(f"Error executing query: {str(e)}")
             logger.error(f"Query: {limited_query}")
+            logger.error(f"Full error: {traceback.format_exc()}")
             raise Exception(f"Error executing query: {str(e)}")
             
     def validate_query_columns(self, query):
@@ -1019,6 +1085,82 @@ class SQLServerConnector:
             return {"error": f"Error getting database DDL: {str(e)}"}
         finally:
             self.disconnect()
+
+    def close(self):
+        """
+        Close the database connection if it's open
+        
+        Returns:
+            bool: True if connection closed successfully, False otherwise
+        """
+        if self.connection is not None:
+            try:
+                self.connection.close()
+                self.connection = None
+                self.is_connected = False
+                logger.info("Database connection closed successfully")
+                return True
+            except Exception as e:
+                logger.error(f"Error closing database connection: {str(e)}")
+                return False
+        else:
+            logger.info("No active connection to close")
+            return True
+
+    @staticmethod
+    def get_connection_by_id(connection_id: str) -> Dict[str, str]:
+        """
+        Get a specific saved SQL Server configuration by ID
+        
+        Args:
+            connection_id (str): Connection ID, typically in format 'sql_N' where N is a number
+                or can be a specific identifier like 'server_database'
+        
+        Returns:
+            Dict[str, str]: Connection parameters or empty dict if not found
+        """
+        try:
+            # Parse numeric ID from connection_id format 'sql_N'
+            index = -1
+            if connection_id.startswith('sql_'):
+                try:
+                    index = int(connection_id.split('_')[1]) - 1  # Convert to 0-based index
+                except (ValueError, IndexError):
+                    logger.warning(f"Invalid connection ID format: {connection_id}")
+                
+            # Get all saved configurations
+            configs = SQLServerConnector.get_saved_configurations()
+            
+            # If we have a numeric index and it's valid, return that config
+            if 0 <= index < len(configs):
+                logger.info(f"Found connection by index: {connection_id} (index {index})")
+                return configs[index]
+            
+            # Otherwise, try matching by server and database
+            if '_' in connection_id:
+                parts = connection_id.split('_', 1)
+                if len(parts) == 2:
+                    server, database = parts
+                    
+                    # Look for matching configuration
+                    for config in configs:
+                        if (config.get('server', '').lower() == server.lower() and 
+                            config.get('database', '').lower() == database.lower()):
+                            logger.info(f"Found connection by server/database: {server}/{database}")
+                            return config
+            
+            # If not found by numeric ID or server/database, try exact match with name field
+            for config in configs:
+                if config.get('name') == connection_id:
+                    logger.info(f"Found connection by name: {connection_id}")
+                    return config
+            
+            logger.warning(f"No saved connection found with ID: {connection_id}")
+            return {}
+            
+        except Exception as e:
+            logger.error(f"Error retrieving connection by ID {connection_id}: {str(e)}")
+            return {}
 
 def fetch_sql_data(connection_params: Dict[str, str], query: str = None, table_name: str = None, limit: int = 1000) -> pd.DataFrame:
     """

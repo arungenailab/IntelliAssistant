@@ -89,11 +89,14 @@ const ChatMessage = ({ message, isUser, isLoading, onSqlQuery }) => {
   const hasModelInfo = message.model_used && message.model_version;
   const isFallback = message.is_fallback;
   
+  // Check if this is an SQL result view marker
+  const isDisplayingSQL = !messageIsUser && message.content === '__SQL_RESULT_VIEW__' && message.sql_result;
+  
   // Extract code blocks from message content
-  const { textContent, codeBlocks } = extractCodeBlocks(message.content);
+  const { textContent, codeBlocks } = !isDisplayingSQL ? extractCodeBlocks(message.content) : { textContent: '', codeBlocks: [] };
   
   // Check if the message contains an SQL query
-  const { sqlQuery } = formatSQLQuery(message.content);
+  const { sqlQuery } = !isDisplayingSQL ? formatSQLQuery(message.content) : { sqlQuery: null };
   
   // Call onSqlQuery if sqlQuery exists and onSqlQuery is provided
   React.useEffect(() => {
@@ -148,50 +151,65 @@ const ChatMessage = ({ message, isUser, isLoading, onSqlQuery }) => {
             </Box>
           ) : (
             <Box>
-              <Box sx={{
-                '& p': { my: 1, lineHeight: 1.6 },
-                '& strong, & b': { fontWeight: 600 },
-                '& ul, & ol': { pl: 2, my: 1 },
-                '& li': { mb: 0.5 },
-                '& h1, & h2, & h3, & h4, & h5, & h6': { mt: 2, mb: 1, fontWeight: 600 },
-                '& a': { color: 'primary.main', textDecoration: 'underline' },
-                '& blockquote': { 
-                  borderLeft: '3px solid', 
-                  borderColor: 'divider',
-                  pl: 1.5, 
-                  py: 0.5, 
-                  my: 1,
-                  fontStyle: 'italic'
-                },
-                '& hr': { 
-                  border: 'none', 
-                  height: '1px', 
-                  bgcolor: 'divider', 
-                  my: 2 
-                },
-                '& table': {
-                  borderCollapse: 'collapse',
-                  width: '100%',
-                  my: 2
-                },
-                '& th, & td': {
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  p: 1
-                },
-                '& th': {
-                  bgcolor: 'background.paper',
-                  fontWeight: 600
-                }
-              }}>
-                <ReactMarkdown 
-                  remarkPlugins={[remarkGfm]} 
-                  rehypePlugins={[rehypeRaw]}
-                  components={components}
-                >
-                  {message.content || ''}
-                </ReactMarkdown>
-              </Box>
+              {/* If this is specifically a SQL Result View */}
+              {isDisplayingSQL ? (
+                <Box sx={{ mt: 0 }}>
+                  <SQLResultView 
+                    sql={message.sql_result.sql}
+                    explanation={message.sql_result.explanation}
+                    results={message.sql_result.results}
+                    error={message.sql_result.error}
+                    confidence={message.sql_result.results && message.sql_result.results.length > 0 ? 0.9 : message.sql_result.confidence}
+                    visualization={message.sql_result.visualization}
+                    compact={true}
+                  />
+                </Box>
+              ) : (
+                <Box sx={{
+                  '& p': { my: 1, lineHeight: 1.6 },
+                  '& strong, & b': { fontWeight: 600 },
+                  '& ul, & ol': { pl: 2, my: 1 },
+                  '& li': { mb: 0.5 },
+                  '& h1, & h2, & h3, & h4, & h5, & h6': { mt: 2, mb: 1, fontWeight: 600 },
+                  '& a': { color: 'primary.main', textDecoration: 'underline' },
+                  '& blockquote': { 
+                    borderLeft: '3px solid', 
+                    borderColor: 'divider',
+                    pl: 1.5, 
+                    py: 0.5, 
+                    my: 1,
+                    fontStyle: 'italic'
+                  },
+                  '& hr': { 
+                    border: 'none', 
+                    height: '1px', 
+                    bgcolor: 'divider', 
+                    my: 2 
+                  },
+                  '& table': {
+                    borderCollapse: 'collapse',
+                    width: '100%',
+                    my: 2
+                  },
+                  '& th, & td': {
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    p: 1
+                  },
+                  '& th': {
+                    bgcolor: 'background.paper',
+                    fontWeight: 600
+                  }
+                }}>
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkGfm]} 
+                    rehypePlugins={[rehypeRaw]}
+                    components={components}
+                  >
+                    {message.content || ''}
+                  </ReactMarkdown>
+                </Box>
+              )}
               
               {sqlQuery && SQLQueryVisualizer && (
                 <Box sx={{ mt: 2 }}>
@@ -199,16 +217,17 @@ const ChatMessage = ({ message, isUser, isLoading, onSqlQuery }) => {
                 </Box>
               )}
               
-              {/* SQL Results Section */}
-              {message.sql_result && (
+              {/* SQL Results Section - only show if not already displaying as main content */}
+              {message.sql_result && !isDisplayingSQL && (
                 <Box sx={{ mt: 2 }}>
                   <SQLResultView 
                     sql={message.sql_result.sql}
                     explanation={message.sql_result.explanation}
                     results={message.sql_result.results}
                     error={message.sql_result.error}
-                    confidence={message.sql_result.confidence}
+                    confidence={message.sql_result.results && message.sql_result.results.length > 0 ? 0.9 : message.sql_result.confidence}
                     visualization={message.sql_result.visualization}
+                    compact={true}
                   />
                 </Box>
               )}

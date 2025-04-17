@@ -372,17 +372,24 @@ const ChatPage = () => {
       }
       
       // Create response message with SQL results
+      const sqlContent = displaySQLResults({
+        sql: response.sql,
+        explanation: response.explanation,
+        result: response.result,
+        confidence: response.confidence || 0
+      });
+      
       const responseMessage = {
         id: loadingMessageId,
         role: 'assistant',
-        content: response.explanation || 'Here are the results of your query:',
+        content: sqlContent || 'No results found for your query.',
         timestamp: new Date().toISOString(),
         sql_result: {
           sql: response.sql,
           explanation: response.explanation,
-          results: response.results,
+          results: response.result,
           error: response.error,
-          confidence: response.confidence,
+          confidence: response.confidence || 0,
           visualization: response.visualization
         }
       };
@@ -1328,6 +1335,47 @@ Or type "cancel" to abandon this query.`,
       setLastProcessedMessageId(lastUserMessage.id);
     }
   }, [messages, awaitingDatasetSelection, availableDatasets, pendingQuery, lastProcessedMessageId]);
+
+  // Process and display SQL query results in chat
+  const displaySQLResults = (sqlData) => {
+    if (!sqlData || !sqlData.sql) return null;
+    
+    // Return the special marker that tells the ChatMessage component to use the SQLResultView
+    return '__SQL_RESULT_VIEW__';
+  };
+  
+  // Format query results as a table
+  const formatResultsTable = (results) => {
+    if (!results || results.length === 0) return "No records";
+    
+    try {
+      // Get column names from the first row
+      const columns = Object.keys(results[0]);
+      
+      // For clients table, use a specific order of columns
+      const orderedColumns = results[0].hasOwnProperty('ClientID') ? 
+        ['ClientID', 'ClientName', 'ContactPerson', 'Email', 'Phone', 'CreatedDate'] :
+        columns;
+      
+      // Create the header row
+      let table = orderedColumns.join(" | ") + "\n";
+      table += orderedColumns.map(() => "---").join(" | ") + "\n";
+      
+      // Add data rows
+      results.forEach(row => {
+        const rowValues = orderedColumns.map(col => {
+          const value = row[col];
+          return value !== null && value !== undefined ? String(value) : "";
+        });
+        table += rowValues.join(" | ") + "\n";
+      });
+      
+      return "```\n" + table + "```";
+    } catch (error) {
+      console.error("Error formatting results table:", error);
+      return "Error formatting results";
+    }
+  };
 
   // Render the chat interface without redundant sidebar
   return (

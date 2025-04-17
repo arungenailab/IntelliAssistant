@@ -140,29 +140,52 @@ AVAILABLE TABLES AND THEIR COLUMNS:
 CRITICAL INSTRUCTIONS (MUST FOLLOW EXACTLY):
 1. You MUST ONLY use tables and columns that EXACTLY match what is listed in the schema above.
 2. NEVER substitute column names with synonyms or similar terms - use the EXACT column names as shown.
-3. For the "Transactions" table, note that:
-   - It has "price_per_unit" (NOT "price")
-   - It has "total_amount" (NOT "amount" or "total")
-   - It does NOT have any column called "fees" or "fee"
-4. COLUMN NAME VERIFICATION PROCESS (MANDATORY):
+3. COLUMN NAME VERIFICATION PROCESS (MANDATORY):
    a. For each column you plan to use, find it in the "EXACT COLUMN NAMES" section
    b. Copy-paste the exact column name - CHARACTER BY CHARACTER - from the schema
    c. Double-check spelling and casing of each column name against the schema
    d. If the user mentions a column that doesn't exist, do NOT use a similar name - use the closest ACTUAL column name
-5. If you cannot find a real column that matches what the user is asking for, state this clearly in your explanation.
-6. Every column in your SQL query MUST appear verbatim in the schema - no exceptions.
+4. If you cannot find a real column that matches what the user is asking for, state this clearly in your explanation.
+5. Every column in your SQL query MUST appear verbatim in the schema - no exceptions.
 
-EXAMPLE (for Transactions table):
-✓ CORRECT: SELECT price_per_unit FROM Transactions
-✗ WRONG: SELECT price FROM Transactions (column doesn't exist)
-✓ CORRECT: SELECT transaction_type, quantity, total_amount FROM Transactions
-✗ WRONG: SELECT type, qty, amount FROM Transactions (columns don't exist)
+JOIN INSTRUCTIONS (CRUCIAL FOR MULTI-TABLE QUERIES):
+1. SIMPLE QUERIES: For queries like "show all X" (e.g., "show all transactions"), start with ONLY that table. DO NOT include other tables unless specifically requested.
+2. PROPER JOIN STRATEGY:
+   a. Use the RELATIONSHIPS section to determine how tables are related
+   b. Use appropriate joins (INNER JOIN, LEFT JOIN) based on these relationships
+   c. AVOID CROSS JOINS except when no relationship exists and you need every combination
+3. JOIN EXAMPLES:
+   - GOOD: SELECT t.* FROM Transactions t INNER JOIN Portfolios p ON t.portfolio_id = p.id WHERE p.name = 'Growth'
+   - BAD: SELECT * FROM Transactions CROSS JOIN Portfolios
+4. FOR "SHOW ALL" PATTERNS:
+   - "Show all transactions" → SELECT * FROM Transactions
+   - NOT: SELECT * FROM Transactions CROSS JOIN Clients CROSS JOIN Portfolios
+
+EXAMPLES:
+✓ CORRECT: SELECT * FROM Transactions
+✗ WRONG: SELECT * FROM Transactions CROSS JOIN Clients CROSS JOIN Portfolios (unnecessary joins)
+✓ CORRECT: SELECT t.transaction_id, t.transaction_date, c.client_name FROM Transactions t INNER JOIN Clients c ON t.client_id = c.client_id
+✗ WRONG: SELECT price FROM Transactions (using non-existent column names)
+
+COMMON QUERY PATTERNS:
+1. LISTING ENTITIES: 
+   - "Show all transactions" → SELECT * FROM Transactions [LIMIT 100]
+   - "List all clients" → SELECT * FROM Clients [LIMIT 100]
+2. FILTERED QUERIES:
+   - "Show transactions for client X" → Use appropriate JOINs with WHERE clauses
+   - "Find assets with value > X" → Use proper column names and conditions
+3. AGGREGATIONS:
+   - "Total transaction amount by client" → Use GROUP BY with appropriate JOINs
 
 VERIFICATION STEPS (REQUIRED):
 1. After drafting your SQL, compare EVERY column name against the schema list
 2. If any column is not an exact match to the schema, replace it with the correct name or remove it
 3. If you can't find a suitable column, explain this in your response
-4. Check one final time that each column name in your SQL exactly matches the schema
+4. VERIFY JOIN QUALITY:
+   a. For "show all X" queries, check if you're using only the necessary tables
+   b. Ensure you're using proper JOIN types based on relationships
+   c. Only use CROSS JOIN when appropriate (rarely needed)
+5. Check one final time that your query is efficient and matches the user's intent
 
 Format your response as a JSON object with the following fields:
 - sql: The SQL query (using ONLY columns that EXACTLY match the schema)
